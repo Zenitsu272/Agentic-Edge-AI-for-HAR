@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#151b19" />
+  <meta name="description" content="CareWatch agentic care dashboard concept" />
+  <title>CareWatch | Agentic Care Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23151b19'/%3E%3Cpath d='M32 48s-16-9.3-16-21a9 9 0 0 1 16-5.3A9 9 0 0 1 48 27c0 11.7-16 21-16 21Z' fill='%23d6785c'/%3E%3C/svg%3E" />
+  <style>
+    :root {
+      --ink: #17211e;
+      --ink-soft: #52605a;
+      --muted: #7a847f;
+      --paper: #fbfaf7;
+      --cream: #f4f1ea;
+      --line: #e6e1d8;
+      --nav: #151b19;
+      --nav-soft: #222b27;
+      --sage: #5f806b;
+      --sage-soft: #e4eee6;
+      --clay: #d6785c;
+      --clay-soft: #f4e4dc;
+      --amber: #c49a4a;
+      --amber-soft: #f5ecd5;
+      --rose: #b66b73;
+      --rose-soft: #f4e4e6;
+      --white: #ffffff;
+      --shadow: 0 16px 36px rgba(24, 33, 30, .07);
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { margin: 0; background: var(--cream); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16px; letter-spacing: -.01em; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    .hidden { display: none !important; }
+    .app { min-height: 100vh; }
+    .login-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(480px, .95fr); background: var(--paper); }
+    .login-visual { position: relative; overflow: hidden; background: var(--nav); color: var(--paper); padding: 56px 7vw; display: flex; flex-direction: column; justify-content: space-between; }
+    .login-visual::before { content: ""; position: absolute; inset: 0; opacity: .19; background-image: linear-gradient(rgba(255,255,255,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.14) 1px, transparent 1px); background-size: 72px 72px; mask-image: linear-gradient(135deg, black 14%, transparent 73%); }
+    .login-visual::after { content: ""; position: absolute; width: 42vw; height: 42vw; max-width: 560px; max-height: 560px; right: -18%; bottom: -28%; border: 1px solid rgba(214, 120, 92, .55); border-radius: 50%; box-shadow: 0 0 0 46px rgba(214,120,92,.06), 0 0 0 92px rgba(214,120,92,.045), 0 0 0 138px rgba(214,120,92,.03); }
+    .brand-lockup, .login-copy, .login-meta { position: relative; z-index: 1; }
+    .brand-lockup { display: flex; align-items: center; gap: 13px; font-weight: 700; letter-spacing: -.03em; font-size: 20px; }
+    .brand-mark { width: 36px; height: 36px; border-radius: 12px; background: var(--clay); display: grid; place-items: center; color: var(--nav); }
+    .brand-mark svg { width: 20px; height: 20px; }
+    .login-copy { max-width: 610px; margin-top: 9vh; }
+    .eyebrow { color: var(--clay); text-transform: uppercase; letter-spacing: .14em; font-weight: 700; font-size: 11px; }
+    .login-copy h1 { margin: 18px 0 18px; max-width: 590px; font-family: Georgia, serif; font-weight: 400; font-size: clamp(48px, 5.1vw, 78px); line-height: .98; letter-spacing: -.06em; }
+    .login-copy p { color: #b8c0bb; max-width: 390px; font-size: 17px; line-height: 1.5; margin: 0; }
+    .login-meta { display: flex; align-items: center; gap: 10px; color: #a8b2ac; font-size: 13px; }
+    .signal-dot { width: 8px; height: 8px; border-radius: 50%; background: #8fb59a; box-shadow: 0 0 0 4px rgba(143,181,154,.12); }
+    .login-panel { display: grid; place-items: center; padding: 52px 7vw; background: var(--paper); }
+    .login-card { width: min(410px, 100%); }
+    .login-card h2 { margin: 0; font-family: Georgia, serif; font-weight: 400; font-size: 38px; letter-spacing: -.045em; }
+    .login-card .lead { color: var(--ink-soft); margin: 10px 0 36px; line-height: 1.45; }
+    .field { display: grid; gap: 9px; margin-bottom: 19px; }
+    .field label { color: var(--ink-soft); font-size: 13px; font-weight: 700; }
+    .field input { width: 100%; padding: 14px 15px; border: 1px solid var(--line); border-radius: 10px; background: white; color: var(--ink); outline: none; transition: border .2s, box-shadow .2s; }
+    .field input:focus { border-color: var(--clay); box-shadow: 0 0 0 4px rgba(214,120,92,.14); }
+    .login-button { width: 100%; border: 0; border-radius: 10px; padding: 15px 18px; background: var(--nav); color: white; font-weight: 700; margin-top: 7px; transition: transform .2s, background .2s; }
+    .login-button:hover { background: #27332e; transform: translateY(-1px); }
+    .login-note { text-align: center; color: var(--muted); font-size: 12px; margin: 17px 0 0; }
+
+    .workspace { min-height: 100vh; display: grid; grid-template-columns: 236px minmax(0, 1fr); }
+    .sidebar { position: sticky; top: 0; height: 100vh; background: var(--nav); color: white; padding: 28px 16px 20px; display: flex; flex-direction: column; }
+    .sidebar .brand-lockup { padding: 0 10px 34px; }
+    .sidebar .brand-mark { width: 32px; height: 32px; border-radius: 10px; }
+    .sidebar-nav { display: grid; gap: 5px; }
+    .nav-label { color: #77837c; font-size: 10px; text-transform: uppercase; letter-spacing: .15em; font-weight: 800; padding: 4px 12px 10px; }
+    .nav-button { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; color: #aeb8b1; background: transparent; border-radius: 10px; padding: 12px; text-align: left; font-size: 14px; transition: color .2s, background .2s; }
+    .nav-button svg { width: 17px; height: 17px; opacity: .85; }
+    .nav-button:hover { color: white; background: var(--nav-soft); }
+    .nav-button.active { color: white; background: #2a3731; box-shadow: inset 3px 0 0 var(--clay); }
+    .sidebar-spacer { flex: 1; }
+    .sidebar-user { border-top: 1px solid #303a35; padding: 18px 8px 0; display: flex; gap: 10px; align-items: center; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800; background: var(--clay-soft); color: var(--clayDark, #8e4837); }
+    .sidebar-user .avatar { width: 32px; height: 32px; background: #34433b; color: #dbe7de; }
+    .sidebar-user strong { display: block; font-size: 13px; color: #f0f2ed; }
+    .sidebar-user span { display: block; font-size: 11px; color: #89958e; margin-top: 2px; }
+    .logout { margin-left: auto; border: 0; background: transparent; color: #8d9992; padding: 5px; }
+    .logout:hover { color: white; }
+    .main { min-width: 0; background: var(--cream); padding: 34px clamp(26px, 4vw, 62px) 46px; }
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 35px; }
+    .topbar h1 { font-family: Georgia, serif; font-size: clamp(34px, 3.4vw, 50px); font-weight: 400; letter-spacing: -.055em; margin: 0; }
+    .topbar p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+    .top-actions { display: flex; align-items: center; gap: 14px; }
+    .system-state { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,.62); border: 1px solid var(--line); border-radius: 99px; padding: 9px 13px; font-size: 12px; color: var(--ink-soft); }
+    .system-state .signal-dot { background: var(--sage); width: 7px; height: 7px; box-shadow: none; }
+    .date-stamp { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 34px; }
+    .metric { min-height: 112px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 20px 21px; position: relative; overflow: hidden; }
+    .metric::after { content: ""; width: 60px; height: 60px; border: 1px solid rgba(95,128,107,.25); border-radius: 50%; position: absolute; right: -14px; bottom: -27px; }
+    .metric.alert::after { border-color: rgba(214,120,92,.34); }
+    .metric-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .metric-value { font-size: 31px; letter-spacing: -.055em; font-weight: 700; margin-top: 11px; }
+    .metric-value small { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: 0; margin-left: 4px; }
+    .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .9fr); gap: 22px; align-items: start; }
+    .surface { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 24px; box-shadow: var(--shadow); }
+    .surface-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 21px; }
+    .surface-header h2 { margin: 0; font-size: 19px; letter-spacing: -.03em; }
+    .surface-header p { margin: 5px 0 0; font-size: 13px; color: var(--muted); }
+    .text-button { border: 0; background: transparent; color: var(--clay); font-weight: 800; font-size: 12px; padding: 4px 0; }
+    .text-button:hover { color: #9c4f39; }
+    .patient-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .patient-card { min-height: 182px; border: 1px solid var(--line); background: #fffefa; border-radius: var(--radius-lg); padding: 17px; display: flex; flex-direction: column; gap: 15px; transition: transform .2s, box-shadow .2s, border-color .2s; }
+    .patient-card:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(24, 33, 30, .08); border-color: #d6cfc3; }
+    .patient-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .patient-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .patient-id .avatar { flex: 0 0 auto; }
+    .patient-id strong { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .patient-id span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 99px; font-weight: 800; font-size: 11px; white-space: nowrap; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .badge.stable { color: var(--sage); background: var(--sage-soft); }
+    .badge.monitor { color: var(--amber); background: var(--amber-soft); }
+    .badge.review { color: var(--rose); background: var(--rose-soft); }
+    .patient-meta { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 13px; border-top: 1px solid var(--line); }
+    .patient-meta span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+    .patient-meta strong { font-size: 13px; }
+    .risk-bar { height: 5px; background: #e7e8e3; border-radius: 99px; overflow: hidden; margin-top: 6px; }
+    .risk-bar i { display: block; height: 100%; border-radius: inherit; background: var(--sage); }
+    .risk-bar i.med { background: var(--amber); }
+    .risk-bar i.high { background: var(--rose); }
+    .feed { display: grid; gap: 2px; }
+    .feed-item { display: grid; grid-template-columns: 20px 1fr auto; gap: 11px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+    .feed-item:last-child { border-bottom: 0; }
+    .feed-icon { width: 20px; height: 20px; border-radius: 7px; display: grid; place-items: center; background: var(--sage-soft); color: var(--sage); }
+    .feed-item.alert .feed-icon { background: var(--clay-soft); color: var(--clay); }
+    .feed-item.review .feed-icon { background: var(--amber-soft); color: var(--amber); }
+    .feed-icon svg { width: 12px; height: 12px; }
+    .feed-item strong { display: block; font-size: 13px; }
+    .feed-item p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .feed-time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .alert-strip { margin-top: 20px; border-left: 3px solid var(--clay); background: var(--clay-soft); border-radius: 0 var(--radius-md) var(--radius-md) 0; padding: 14px 15px; display: flex; gap: 12px; align-items: flex-start; }
+    .alert-strip strong { display: block; font-size: 13px; }
+    .alert-strip p { margin: 4px 0 0; color: #73564c; font-size: 12px; line-height: 1.4; }
+
+    .detail-shell { max-width: 1260px; }
+    .back-link { border: 0; background: transparent; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; padding: 0; font-size: 13px; font-weight: 700; margin-bottom: 21px; }
+    .back-link:hover { color: var(--ink); }
+    .detail-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 27px; }
+    .detail-title h1 { margin: 0; font-family: Georgia, serif; font-weight: 400; font-size: clamp(36px, 4vw, 54px); letter-spacing: -.06em; }
+    .detail-title p { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+    .detail-actions { display: flex; gap: 8px; }
+    .outline-button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink-soft); padding: 10px 12px; border-radius: 10px; font-size: 12px; font-weight: 800; }
+    .outline-button:hover { border-color: #c8c0b4; color: var(--ink); }
+    .detail-summary { display: grid; grid-template-columns: 1.2fr repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
+    .summary-card { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 18px; min-height: 104px; }
+    .summary-card.primary { background: var(--nav); color: white; border-color: var(--nav); }
+    .summary-card span { color: var(--muted); display: block; font-size: 11px; font-weight: 700; }
+    .summary-card.primary span { color: #99aaa0; }
+    .summary-card strong { display: block; margin-top: 10px; font-size: 22px; letter-spacing: -.04em; }
+    .summary-card.primary strong { color: #eef2ec; }
+    .detail-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: 22px; align-items: start; }
+    .analysis-card { min-height: 430px; }
+    .timeline { position: relative; padding: 10px 0 4px 25px; }
+    .timeline::before { content: ""; position: absolute; top: 17px; bottom: 17px; left: 7px; width: 1px; background: var(--line); }
+    .timeline-item { position: relative; display: grid; grid-template-columns: 72px 1fr auto; gap: 15px; padding: 0 0 25px; }
+    .timeline-item:last-child { padding-bottom: 5px; }
+    .timeline-item::before { content: ""; position: absolute; left: -22px; top: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--sage); box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--line); }
+    .timeline-item.alert::before { background: var(--clay); }
+    .timeline-item.review::before { background: var(--amber); }
+    .timeline-time { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .timeline-copy strong { display: block; font-size: 14px; }
+    .timeline-copy p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .timeline-tag { color: var(--sage); font-size: 11px; font-weight: 800; }
+    .timeline-item.alert .timeline-tag { color: var(--clay); }
+    .timeline-item.review .timeline-tag { color: var(--amber); }
+    .agent-card { background: var(--nav); border-color: var(--nav); color: white; }
+    .agent-card .surface-header p { color: #94a299; }
+    .agent-card .surface-header h2 { color: white; }
+    .agent-pulse { display: flex; gap: 8px; align-items: center; color: #9fb0a5; font-size: 12px; margin: 3px 0 22px; }
+    .agent-pulse .signal-dot { background: var(--clay); box-shadow: none; }
+    .agent-observation { border: 1px solid #34423b; background: #202a25; border-radius: 12px; padding: 14px; margin-bottom: 15px; }
+    .agent-observation .small-label { color: #9fb0a5; }
+    .agent-observation strong { display: block; margin-top: 8px; font-size: 17px; letter-spacing: -.025em; }
+    .agent-observation p { margin: 7px 0 0; color: #bac5be; font-size: 12px; line-height: 1.45; }
+    .agent-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #303a35; padding: 13px 0; gap: 12px; }
+    .agent-row:last-child { border-bottom: 0; }
+    .agent-row span { color: #9fb0a5; font-size: 12px; }
+    .agent-row strong { font-size: 13px; color: #eef2ec; }
+    .decision { margin-top: 19px; border-radius: 12px; padding: 14px; background: var(--clay); color: white; }
+    .decision .small-label { color: rgba(255,255,255,.76); }
+    .decision strong { display: block; margin-top: 7px; font-size: 17px; }
+    .detail-bottom { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 22px; }
+    .mini-chart { height: 120px; display: flex; align-items: end; gap: 12px; padding: 12px 4px 0; border-bottom: 1px solid var(--line); }
+    .bar { flex: 1; min-width: 18px; border-radius: 7px 7px 0 0; background: var(--sage); opacity: .9; position: relative; }
+    .bar span { position: absolute; top: calc(100% + 9px); left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 10px; }
+    .bar.current { background: var(--clay); }
+    .signal-list { display: grid; gap: 2px; }
+    .signal-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .signal-row:last-child { border-bottom: 0; }
+    .signal-row strong { display: block; font-size: 13px; }
+    .signal-row span { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .score { font-weight: 800; color: var(--sage); font-size: 13px; }
+    .score.warn { color: var(--amber); }
+    .score.risk { color: var(--clay); }
+    .mobile-only { display: none; }
+    @media (max-width: 1080px) {
+      .workspace { grid-template-columns: 80px minmax(0,1fr); }
+      .sidebar { padding: 22px 12px; align-items: center; }
+      .sidebar .brand-lockup { padding: 0 0 32px; }
+      .sidebar .brand-lockup span, .nav-button span, .nav-label, .sidebar-user > div, .logout { display: none; }
+      .nav-button { justify-content: center; padding: 13px; }
+      .sidebar-user { padding: 18px 0 0; }
+      .sidebar-user .avatar { width: 36px; height: 36px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 800px) {
+      .login-shell { grid-template-columns: 1fr; }
+      .login-visual { min-height: 370px; padding: 32px 28px; }
+      .login-copy { margin-top: 44px; }
+      .login-copy h1 { font-size: 53px; }
+      .login-panel { padding: 44px 28px 56px; }
+      .workspace { display: block; }
+      .sidebar { position: fixed; z-index: 20; width: 100%; height: 70px; bottom: 0; top: auto; flex-direction: row; padding: 10px 13px; align-items: center; justify-content: space-around; box-shadow: 0 -8px 24px rgba(15,20,17,.12); }
+      .sidebar .brand-lockup, .sidebar-spacer, .sidebar-user { display: none; }
+      .sidebar-nav { display: flex; width: 100%; justify-content: space-around; }
+      .nav-button { display: grid; gap: 3px; justify-items: center; color: #849189; font-size: 10px; padding: 5px 12px; }
+      .nav-button span { display: block; font-size: 10px; }
+      .nav-button.active { box-shadow: inset 0 2px 0 var(--clay); }
+      .main { padding: 26px 18px 94px; }
+      .topbar { display: block; margin-bottom: 27px; }
+      .top-actions { margin-top: 17px; justify-content: space-between; }
+      .dashboard-grid, .detail-grid, .detail-bottom { grid-template-columns: 1fr; }
+      .patient-grid { grid-template-columns: 1fr; }
+      .detail-summary { grid-template-columns: repeat(2, 1fr); }
+      .detail-summary .primary { grid-column: span 2; }
+      .detail-title { display: block; }
+      .detail-actions { margin-top: 17px; }
+      .mobile-only { display: inline-flex; }
+    }
+    @media (max-width: 500px) {
+      .metrics { grid-template-columns: 1fr 1fr; gap: 9px; }
+      .metric { padding: 15px; min-height: 102px; }
+      .metric-value { font-size: 26px; }
+      .surface { padding: 18px; border-radius: 18px; }
+      .patient-card { min-height: 165px; }
+      .date-stamp { display: none; }
+      .system-state { margin-left: auto; }
+      .timeline-item { grid-template-columns: 55px 1fr; gap: 10px; }
+      .timeline-tag { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="app"></div>
+  <script>
+    const patients = [
+      { id: 'anita', initials: 'AR', name: 'Anita Rao', room: 'Room 204 · Wing A', state: 'Stable', stateClass: 'stable', last: 'Walking', time: '8 min ago', risk: 'Low', riskClass: '', width: '28%', color: '#e9dccf', detail: { lastEvent: 'Walking', eventTime: '8 min ago', confidence: '96%', reviewed: 'Today, 09:42', observation: 'Normal movement pattern', observationDetail: 'No fall signal detected. Gait remains consistent with recent activity.', decision: 'Continue monitoring', decisionDetail: 'The agent found no escalation signal.', memory: '3 similar morning routines', memoryTone: 'sage' } },
+      { id: 'james', initials: 'JM', name: 'James Martin', room: 'Room 118 · Wing B', state: 'Monitor', stateClass: 'monitor', last: 'Bed exit', time: '21 min ago', risk: 'Moderate', riskClass: 'med', width: '54%', color: '#d9e5db', detail: { lastEvent: 'Bed exit', eventTime: '21 min ago', confidence: '91%', reviewed: 'Today, 09:28', observation: 'Unusual night movement', observationDetail: 'Bed exit detected outside the resident’s usual overnight pattern.', decision: 'Review recommended', decisionDetail: 'The agent found a change from baseline routine.', memory: '2 prior bed-exit events', memoryTone: 'warn' } },
+      { id: 'maya', initials: 'MC', name: 'Maya Chen', room: 'Room 307 · Wing A', state: 'Review', stateClass: 'review', last: 'Possible fall', time: '2 min ago', risk: 'High', riskClass: 'high', width: '82%', color: '#f0ddd4', detail: { lastEvent: 'Possible fall', eventTime: '2 min ago', confidence: '94%', reviewed: 'Today, 09:47', observation: 'Possible fall on floor', observationDetail: 'Pose model crossed the fall threshold. VLM verification is complete.', decision: 'Emergency alert sent', decisionDetail: 'No recovery observed during the follow-up window.', memory: '1 similar event this month', memoryTone: 'risk' } },
+      { id: 'robert', initials: 'RE', name: 'Robert Ellis', room: 'Room 112 · Wing B', state: 'Stable', stateClass: 'stable', last: 'Resting', time: '34 min ago', risk: 'Low', riskClass: '', width: '22%', color: '#ded7cc', detail: { lastEvent: 'Resting', eventTime: '34 min ago', confidence: '98%', reviewed: 'Today, 09:15', observation: 'Resting in bed', observationDetail: 'Posture and duration match the resident’s normal rest pattern.', decision: 'Continue monitoring', decisionDetail: 'The agent found no escalation signal.', memory: '5 similar rest events', memoryTone: 'sage' } },
+    ];
+
+    function icon(name, size = 18) {
+      const p = { grid: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/>', users: '<path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-3A4.5 4.5 0 0 0 4 18.5V20"/><circle cx="10" cy="7" r="3"/><path d="M16 4.5a3 3 0 0 1 0 5.8M18 14.1a4.5 4.5 0 0 1 3 4.2V20"/>', bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>', activity: '<path d="M3 12h4l2.2-7L14 19l2-7h5"/>', arrow: '<path d="m9 18 6-6-6-6"/>', back: '<path d="m15 18-6-6 6-6"/>', clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>', check: '<path d="m5 12 4 4L19 6"/>', alert: '<path d="M10.3 4.2 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0ZM12 9v4m0 3h.01"/>', logout: '<path d="M10 17l5-5-5-5M15 12H3M21 19V5a2 2 0 0 0-2-2h-5"/>', heart: '<path d="M20.8 8.8c0 5.2-8.8 10-8.8 10s-8.8-4.8-8.8-10A4.8 4.8 0 0 1 12 6.5a4.8 4.8 0 0 1 8.8 2.3Z"/>' };
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p[name] || p.grid}</svg>`;
+    }
+    const logo = `<span class="brand-mark">${icon('heart', 20)}</span><span>CareWatch</span>`;
+    const app = document.getElementById('app');
+    let activeView = 'overview';
+    let selectedPatient = null;
+
+    function loginView() {
+      app.innerHTML = `<main class="login-shell"><section class="login-visual"><div class="brand-lockup">${logo}</div><div class="login-copy"><div class="eyebrow">Agentic care intelligence</div><h1>Care that knows when to look closer.</h1><p>One calm workspace for resident safety, context and response.</p></div><div class="login-meta"><span class="signal-dot"></span> Secure clinical workspace</div></section><section class="login-panel"><div class="login-card"><div class="eyebrow">Welcome back</div><h2>Sign in</h2><p class="lead">Enter your workspace credentials to continue.</p><form id="loginForm"><div class="field"><label for="email">Work email</label><input id="email" type="email" placeholder="care@facility.org" required /></div><div class="field"><label for="password">Password</label><input id="password" type="password" placeholder="••••••••" required /></div><button class="login-button" type="submit">Open workspace</button></form><p class="login-note">Demo interface · synthetic resident data</p></div></section></main>`;
+      document.getElementById('loginForm').addEventListener('submit', (e) => { e.preventDefault(); workspaceView(); });
+    }
+
+    function sidebar() {
+      const items = [['overview', 'Overview', 'grid'], ['patients', 'Patients', 'users'], ['alerts', 'Alerts', 'bell'], ['signals', 'Signals', 'activity']];
+      return `<aside class="sidebar"><div class="brand-lockup">${logo}</div><nav class="sidebar-nav"><div class="nav-label">Workspace</div>${items.map(([id, label, ico]) => `<button class="nav-button ${activeView === id ? 'active' : ''}" data-view="${id}">${icon(ico)}<span>${label}</span></button>`).join('')}</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><span class="avatar">VT</span><div><strong>Vaishak T</strong><span>Care team admin</span></div><button class="logout" id="logoutBtn" aria-label="Log out">${icon('logout', 17)}</button></div></aside>`;
+    }
+
+    function topbar(title, subtitle) { return `<header class="topbar"><div><div class="eyebrow">CareWatch / ${activeView}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="top-actions"><span class="date-stamp">15 September 2026</span><span class="system-state"><i class="signal-dot"></i> All systems normal</span></div></header>`; }
+
+    function metric(label, value, sub = '', alert = false) { return `<div class="metric ${alert ? 'alert' : ''}"><div class="metric-label">${label}</div><div class="metric-value">${value}${sub ? `<small>${sub}</small>` : ''}</div></div>`; }
+
+    function patientCard(p) {
+      return `<button class="patient-card" data-patient="${p.id}"><div class="patient-top"><div class="patient-id"><span class="avatar" style="background:${p.color}">${p.initials}</span><div><strong>${p.name}</strong><span>${p.room}</span></div></div><span class="badge ${p.stateClass}">${p.state}</span></div><div class="patient-meta"><div><span>Last signal</span><strong>${p.last}</strong><span>${p.time}</span></div><div><span>Risk level</span><strong>${p.risk}</strong><div class="risk-bar"><i class="${p.riskClass}" style="width:${p.width}"></i></div></div></div></button>`;
+    }
+
+    function feedItem(type, ico, title, copy, time) { return `<div class="feed-item ${type}"><span class="feed-icon">${icon(ico, 12)}</span><div><strong>${title}</strong><p>${copy}</p></div><span class="feed-time">${time}</span></div>`; }
+
+    function overviewView() {
+      activeView = 'overview'; selectedPatient = null;
+      app.innerHTML = `<div class="workspace">${sidebar()}<main class="main">${topbar('Care overview', 'Quiet signals, clear decisions, timely support.')}<section class="metrics">${metric('Residents monitored', '24')} ${metric('Needs review', '3')} ${metric('Active alerts', '1', '', true)} ${metric('System uptime', '98.4', '%')}</section><div class="dashboard-grid"><section class="surface"><div class="surface-header"><div><h2>Resident watch</h2><p>Current status across monitored rooms</p></div><button class="text-button" id="viewPatients">View all patients ${icon('arrow', 13)}</button></div><div class="patient-grid">${patients.map(patientCard).join('')}</div></section><section class="surface"><div class="surface-header"><div><h2>Live activity</h2><p>Agent-reviewed events</p></div><button class="text-button" data-view="alerts">All alerts</button></div><div class="feed">${feedItem('', 'check', 'Routine movement', 'Anita Rao · Room 204', '8 min')} ${feedItem('review', 'clock', 'Bed exit detected', 'James Martin · Room 118', '21 min')} ${feedItem('alert', 'alert', 'Possible fall verified', 'Maya Chen · Room 307', '2 min')} ${feedItem('', 'activity', 'Resting pattern', 'Robert Ellis · Room 112', '34 min')}</div><div class="alert-strip"><span class="feed-icon">${icon('alert', 13)}</span><div><strong>1 alert requires attention</strong><p>Maya Chen · emergency alert sent 2 minutes ago.</p></div></div></section></div></main></div>`;
+      bindWorkspace();
+      document.getElementById('viewPatients')?.addEventListener('click', () => { activeView = 'patients'; workspaceView(); });
+    }
+
+    function patientsView() {
+      activeView = 'patients'; selectedPatient = null;
+      app.innerHTML = `<div class="workspace">${sidebar()}<main class="main">${topbar('Patients', 'Select a resident to open the full analysis.')}<section class="surface"><div class="surface-header"><div><h2>All residents</h2><p>4 active profiles · Synthetic demo data</p></div><span class="system-state"><i class="signal-dot"></i> Monitoring live</span></div><div class="patient-grid">${patients.map(patientCard).join('')}</div></section></main></div>`;
+      bindWorkspace();
+    }
+
+    function alertsView() {
+      activeView = 'alerts'; selectedPatient = null;
+      app.innerHTML = `<div class="workspace">${sidebar()}<main class="main">${topbar('Alerts', 'Decisions that may need a human response.')}<section class="surface"><div class="surface-header"><div><h2>Alert queue</h2><p>Prioritised by severity and recency</p></div><span class="badge review">1 active</span></div><div class="feed">${feedItem('alert', 'alert', 'Possible fall verified', 'Maya Chen · Room 307 · No recovery observed during follow-up', '2 min')} ${feedItem('review', 'clock', 'Bed exit outside routine', 'James Martin · Room 118 · Agent recommends review', '21 min')} ${feedItem('', 'check', 'Routine movement cleared', 'Anita Rao · Room 204 · No escalation signal', '8 min')} ${feedItem('', 'check', 'Resting pattern cleared', 'Robert Ellis · Room 112 · Matches resident baseline', '34 min')}</div></section></main></div>`;
+      bindWorkspace();
+    }
+
+    function signalsView() {
+      activeView = 'signals'; selectedPatient = null;
+      app.innerHTML = `<div class="workspace">${sidebar()}<main class="main">${topbar('Model signals', 'Perception outputs before agentic escalation.')}<section class="metrics">${metric('Motion gate', 'YOLO26n')} ${metric('Fall model', 'YOLO11n-Pose')} ${metric('Threshold', '70', '%')} ${metric('Events today', '12')}</section><div class="dashboard-grid"><section class="surface"><div class="surface-header"><div><h2>Signal pipeline</h2><p>From edge evidence to a verified decision</p></div></div><div class="feed">${feedItem('', 'activity', 'Motion gate', 'Filters the stream for relevant movement', 'Edge')} ${feedItem('', 'activity', 'Fall score', 'YOLO11n-Pose evaluates event clips', 'Edge')} ${feedItem('review', 'clock', 'VLM verification', 'Context and previous occurrences are checked', 'Agent')} ${feedItem('alert', 'alert', 'Escalation decision', 'Policy selects log, review or alert', 'Policy')}</div></section><section class="surface"><div class="surface-header"><div><h2>Decision split</h2><p>Today’s event outcomes</p></div></div><div class="mini-chart"><div class="bar" style="height:72%"><span>8</span></div><div class="bar" style="height:37%"><span>3</span></div><div class="bar current" style="height:18%"><span>1</span></div></div><div class="patient-meta" style="margin-top:30px"><div><span>Logged</span><strong>8 normal</strong></div><div><span>Escalated</span><strong>1 emergency</strong></div></div></section></div></main></div>`;
+      bindWorkspace();
+    }
+
+    function detailView(p) {
+      activeView = 'patients'; selectedPatient = p.id;
+      const d = p.detail;
+      app.innerHTML = `<div class="workspace">${sidebar()}<main class="main"><div class="detail-shell"><button class="back-link" id="backBtn">${icon('back', 15)} Back to patients</button><div class="detail-title"><div><div class="eyebrow">Patient profile / ${p.room}</div><h1>${p.name}</h1><p>Resident analysis · Last updated ${d.reviewed.toLowerCase()}</p></div><div class="detail-actions"><button class="outline-button">${icon('activity', 14)} Activity log</button><button class="outline-button">${icon('bell', 14)} Alert settings</button></div></div><section class="detail-summary"><div class="summary-card primary"><span>Current state</span><strong>${d.decision}</strong></div><div class="summary-card"><span>Last event</span><strong>${d.lastEvent}</strong></div><div class="summary-card"><span>Agent confidence</span><strong>${d.confidence}</strong></div><div class="summary-card"><span>Last review</span><strong>${d.reviewed.replace('Today, ', '')}</strong></div></section><div class="detail-grid"><section class="surface analysis-card"><div class="surface-header"><div><h2>Activity analysis</h2><p>Recent events and model evidence</p></div><span class="badge ${p.stateClass}">${p.state}</span></div><div class="timeline"><div class="timeline-item"><span class="timeline-time">09:12</span><div class="timeline-copy"><strong>Baseline movement</strong><p>Normal activity observed in the resident’s room.</p></div><span class="timeline-tag">Cleared</span></div><div class="timeline-item review"><span class="timeline-time">09:44</span><div class="timeline-copy"><strong>Motion event captured</strong><p>Edge gate created a short event clip for analysis.</p></div><span class="timeline-tag">Review</span></div><div class="timeline-item alert"><span class="timeline-time">09:45</span><div class="timeline-copy"><strong>${d.observation}</strong><p>${d.observationDetail}</p></div><span class="timeline-tag">${p.id === 'maya' ? 'Verified' : 'Observed'}</span></div><div class="timeline-item"><span class="timeline-time">09:47</span><div class="timeline-copy"><strong>Agentic decision</strong><p>${d.decisionDetail}</p></div><span class="timeline-tag">Logged</span></div></div></section><section class="surface agent-card"><div class="surface-header"><div><h2>Agent assessment</h2><p>Evidence assembled for this decision</p></div>${icon('activity', 18)}</div><div class="agent-pulse"><span class="signal-dot"></span> Reasoning complete</div><div class="agent-observation"><span class="small-label">Verified observation</span><strong>${d.observation}</strong><p>${d.observationDetail}</p></div><div class="agent-row"><span>Fall score</span><strong>${p.id === 'maya' ? '82%' : '18%'}</strong></div><div class="agent-row"><span>Memory match</span><strong>${d.memory}</strong></div><div class="agent-row"><span>Follow-up</span><strong>${p.id === 'maya' ? 'No recovery' : 'Not required'}</strong></div><div class="decision"><span class="small-label">Escalation decision</span><strong>${d.decision}</strong></div></section></div><div class="detail-bottom"><section class="surface"><div class="surface-header"><div><h2>Activity rhythm</h2><p>Last 7 monitored intervals</p></div></div><div class="mini-chart"><div class="bar" style="height:54%"><span>M</span></div><div class="bar" style="height:72%"><span>T</span></div><div class="bar" style="height:43%"><span>W</span></div><div class="bar" style="height:66%"><span>T</span></div><div class="bar" style="height:79%"><span>F</span></div><div class="bar" style="height:61%"><span>S</span></div><div class="bar current" style="height:88%"><span>S</span></div></div></section><section class="surface"><div class="surface-header"><div><h2>Safety signals</h2><p>Current model evidence</p></div></div><div class="signal-list"><div class="signal-row"><div><strong>Motion consistency</strong><span>Compared with resident baseline</span></div><span class="score">Normal</span></div><div class="signal-row"><div><strong>Fall posture</strong><span>Pose model output</span></div><span class="score ${p.id === 'maya' ? 'risk' : ''}">${p.id === 'maya' ? 'Review' : 'Clear'}</span></div><div class="signal-row"><div><strong>Recovery observed</strong><span>Follow-up window</span></div><span class="score ${p.id === 'maya' ? 'risk' : 'warn'}">${p.id === 'maya' ? 'No' : 'Yes'}</span></div></div></section></div></div></main></div>`;
+      bindWorkspace();
+      document.getElementById('backBtn')?.addEventListener('click', () => { patientsView(); });
+    }
+
+    function bindWorkspace() {
+      document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => { const v = btn.dataset.view; if (v === 'overview') overviewView(); else if (v === 'patients') patientsView(); else if (v === 'alerts') alertsView(); else signalsView(); }));
+      document.querySelectorAll('[data-patient]').forEach(btn => btn.addEventListener('click', () => { detailView(patients.find(p => p.id === btn.dataset.patient)); }));
+      document.getElementById('logoutBtn')?.addEventListener('click', loginView);
+    }
+    function workspaceView() { if (activeView === 'patients') patientsView(); else if (activeView === 'alerts') alertsView(); else if (activeView === 'signals') signalsView(); else overviewView(); }
+    loginView();
+  </script>
+</body>
+</html>
