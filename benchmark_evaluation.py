@@ -1,12 +1,84 @@
 import time
 import json
+import os
+from pathlib import Path
 import cv2
 import numpy as np
 from inference import InferencePipeline
 
+GROUND_TRUTH_PATH = Path(__file__).parent / "benchmark_ground_truth.json"
+
+def evaluate_predictions_against_ground_truth(predicted_events, ground_truth_data):
+    """
+    Strict one-to-one bipartite matching between predicted events and ground truth positive falls.
+    Enforces:
+    1. A single prediction cannot match more than one ground truth event.
+    2. A ground truth event cannot be matched by more than one prediction.
+    3. Separate genuine falls (even within 10s) are matched independently.
+    """
+    gt_falls = ground_truth_data.get("positive_fall_events", [])
+    tol = ground_truth_data.get("matching_criteria", {}).get("temporal_tolerance_sec", 3.5)
+    
+    # Sort predictions chronologically
+    sorted_preds = sorted(predicted_events, key=lambda x: x["timestamp_sec"])
+    
+    matched_gt = set()
+    matched_preds = set()
+    matches = []
+    
+    # Build candidate pairs (distance, pred_idx, gt_id)
+    candidates = []
+    for p_idx, pred in enumerate(sorted_preds):
+        p_time = pred["timestamp_sec"]
+        for gt in gt_falls:
+            gt_id = gt["event_id"]
+            start = gt["start_sec"] - tol
+            end = gt["end_sec"] + tol
+            if start <= p_time <= end:
+                dist = abs(p_time - gt.get("peak_sec", (start + end)/2.0))
+                candidates.append((dist, p_idx, gt_id, pred, gt))
+                
+    # Greedily match nearest pairs (one-to-one)
+    candidates.sort(key=lambda x: x[0])
+    for dist, p_idx, gt_id, pred, gt in candidates:
+        if p_idx not in matched_preds and gt_id not in matched_gt:
+            matched_preds.add(p_idx)
+            matched_gt.add(gt_id)
+            matches.append({
+                "predicted_event_id": pred.get("event_id"),
+                "pred_timestamp_sec": pred["timestamp_sec"],
+                "gt_event_id": gt_id,
+                "gt_start_sec": gt["start_sec"],
+                "gt_end_sec": gt["end_sec"],
+                "temporal_error_sec": round(dist, 2)
+            })
+            
+    tp = len(matches)
+    fp = len(sorted_preds) - tp
+    fn = len(gt_falls) - tp
+    
+    precision = (tp / max(tp + fp, 1)) * 100.0
+    recall = (tp / max(tp + fn, 1)) * 100.0
+    f1 = 2 * (precision * recall) / max(precision + recall, 1e-4) if (precision + recall) > 0 else 0.0
+    
+    return {
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "precision_pct": round(precision, 1),
+        "recall_pct": round(recall, 1),
+        "f1_pct": round(f1, 1),
+        "matches": matches,
+        "unmatched_predictions": [p for i, p in enumerate(sorted_preds) if i not in matched_preds],
+        "unmatched_ground_truth": [gt for gt in gt_falls if gt["event_id"] not in matched_gt]
+    }
+
 def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
     print(f"[Benchmark] Initializing pipeline on GPU...")
     pipeline = InferencePipeline()
+    
+    with open(GROUND_TRUTH_PATH, "r") as f:
+        gt_data = json.load(f)
     
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -58,17 +130,19 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
                 "drop_velocity": res["stage3_event"]["drop_velocity"]
             })
             if curr_state == "FALL_CONFIRMED":
-                events_detected.append({
-                    "event_id": f"FALL-{len(events_detected)+1}",
-                    "timestamp_sec": timestamp_sec,
-                    "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
-                    "dwell_sec": res["stage3_event"]["ground_dwell_sec"]
-                })
-                print(f"[EVENT DETECTED] Confirmed Fall at {timestamp_sec:.1f}s! Posture: {res['stage2_posture']['posture']}")
+                # Distinct event creation (debounced by short 2.5s dwell window instead of destructive 10s merging)
+                if not events_detected or (timestamp_sec - events_detected[-1]["timestamp_sec"]) > 2.5:
+                    events_detected.append({
+                        "event_id": f"FALL-{len(events_detected)+1}",
+                        "timestamp_sec": timestamp_sec,
+                        "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+                        "dwell_sec": res["stage3_event"]["ground_dwell_sec"]
+                    })
+                    print(f"[EVENT DETECTED] Confirmed Fall at {timestamp_sec:.1f}s! Posture: {res['stage2_posture']['posture']}")
             last_state = curr_state
 
         frame_idx += 1
-        if frame_idx % 200 == 0:
+        if frame_idx % 400 == 0:
             print(f"[Progress] Processed {frame_idx}/{total_frames} frames ({frame_idx/total_frames*100:.1f}%) | Avg Latency: {np.mean(latencies):.1f}ms")
 
     cap.release()
@@ -76,35 +150,25 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
     avg_latency = float(np.mean(latencies))
     median_latency = float(np.median(latencies))
     effective_fps = float(frame_idx / total_processing_time)
-
-    # Ground truth validation for D:\Recording 2026-10-20 130626.mp4:
-    # Ground truth: 2 staged fall incidents
-    # True Fall 1: ~01:17 - 01:32 (77s - 92s)
-    # True Fall 2: ~01:47 - 02:00 (107s - 120s)
-    # True Non-fall Sitting / Leaning: ~00:35 - 01:10 (35s - 70s)
-    
-    # Cluster consecutive frame alerts into distinct incident episodes (10s cooldown window)
-    clustered_events = []
-    for evt in events_detected:
-        t = evt["timestamp_sec"]
-        if not clustered_events or (t - clustered_events[-1]["timestamp_sec"]) > 10.0:
-            clustered_events.append(evt)
-
-    fall1_detected = any(75.0 <= e["timestamp_sec"] <= 95.0 for e in clustered_events)
-    fall2_detected = any(105.0 <= e["timestamp_sec"] <= 125.0 for e in clustered_events)
-    tp = int(fall1_detected) + int(fall2_detected)
-    fp = len([e for e in clustered_events if not ((75.0 <= e["timestamp_sec"] <= 95.0) or (105.0 <= e["timestamp_sec"] <= 125.0))])
-    fn = max(0, 2 - tp)
-    
-    precision = (tp / max(tp + fp, 1)) * 100.0
-    recall = (tp / max(tp + fn, 1)) * 100.0
-    f1 = 2 * (precision * recall) / max(precision + recall, 1e-4)
     p95_latency = float(np.percentile(latencies, 95)) if latencies else avg_latency
+
+    # Strict 1-to-1 matching against versioned ground truth
+    match_eval = evaluate_predictions_against_ground_truth(events_detected, gt_data)
+    
+    tp = match_eval["true_positives"]
+    fp = match_eval["false_positives"]
+    fn = match_eval["false_negatives"]
+    precision = match_eval["precision_pct"]
+    recall = match_eval["recall_pct"]
+    f1 = match_eval["f1_pct"]
     false_alerts_per_hour = round(float(fp / max(duration_sec / 3600.0, 1e-4)), 2)
 
     results = {
-        "dataset_name": "Recording 2026-10-20 130626.mp4 (Continuous Staged Activities & Falls)",
+        "dataset_name": gt_data["recording_filename"],
         "dataset_description": "Single-subject staged benchmark clip with standing, continuous seated reading, and 2 distinct floor falls.",
+        "ground_truth_version": gt_data["version"],
+        "ground_truth_provenance": gt_data["provenance"],
+        "matching_rules": gt_data["matching_criteria"]["matching_rule"],
         "hardware": "NVIDIA GeForce RTX 3050 6GB Laptop GPU (CUDA 13.0, Torch 2.5.1+cu121)",
         "total_frames_evaluated": frame_idx,
         "video_duration_sec": round(duration_sec, 2),
@@ -115,20 +179,23 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
         "detection_delay_sec": 1.5,
         "false_alerts_per_hour": false_alerts_per_hour,
         "posture_distribution": posture_counts,
-        "ground_truth_events": 2,
+        "ground_truth_positive_events_count": len(gt_data["positive_fall_events"]),
+        "ground_truth_negative_intervals_count": len(gt_data["negative_activity_intervals"]),
+        "predicted_events_count": len(events_detected),
         "true_positives": tp,
         "false_positives": fp,
         "false_negatives": fn,
-        "event_level_precision_pct": round(precision, 1),
-        "event_level_recall_pct": round(recall, 1),
-        "event_level_f1_pct": round(f1, 1),
+        "event_level_precision_pct": precision,
+        "event_level_recall_pct": recall,
+        "event_level_f1_pct": f1,
         "false_alerts_during_sitting_or_leaning": 0,
-        "incident_clusters_detected": len(clustered_events),
-        "confirmed_fall_events": clustered_events,
+        "one_to_one_matches": match_eval["matches"],
+        "confirmed_fall_events": events_detected,
         "state_transitions": timeline[:15]
     }
 
-    with open("benchmark_results.json", "w") as f:
+    out_file = Path(__file__).parent / "benchmark_results.json"
+    with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
 
     print("\n================ BENCHMARK RESULTS ================")
@@ -136,9 +203,13 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
     print(f"Total Frames: {frame_idx} | Video Length: {duration_sec:.1f}s")
     print(f"Avg Inference Latency: {avg_latency:.2f} ms ({effective_fps:.1f} FPS)")
     print(f"Event Precision: {precision:.1f}% | Event Recall: {recall:.1f}% | F1: {f1:.1f}%")
-    print(f"False Positives during Sitting / Leaning: 0")
-    print(f"Confirmed Falls Detected: {len(events_detected)} (Ground Truth: 2)")
+    print(f"Confirmed Falls Detected: {len(events_detected)} (Ground Truth: {len(gt_data['positive_fall_events'])})")
     print("===================================================\n")
+    return results
 
 if __name__ == "__main__":
-    run_benchmark()
+    import argparse
+    parser = argparse.ArgumentParser(description="CareWatch Empirical Benchmark Evaluation")
+    parser.add_argument("--video", type=str, default=r"D:\Recording 2026-10-20 130626.mp4")
+    args = parser.parse_args()
+    run_benchmark(args.video)

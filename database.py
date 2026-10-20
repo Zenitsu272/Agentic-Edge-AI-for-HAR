@@ -1,19 +1,21 @@
 import sqlite3
 import json
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 DB_PATH = Path(__file__).parent / "carewatch.db"
 
-def get_db_connection():
-    conn = sqlite3.connect(str(DB_PATH))
+def get_db_connection(db_path: Optional[str] = None):
+    p = db_path or str(DB_PATH)
+    conn = sqlite3.connect(p)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    conn = get_db_connection()
+def init_db(db_path: Optional[str] = None):
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
     # 1. Events Table: Structured event store for all detected activities, candidates, and falls
@@ -54,76 +56,75 @@ def init_db():
     
     conn.commit()
     
-    # Seed baseline records if empty so the system has an initial audit history
-    cursor.execute("SELECT COUNT(*) FROM events")
-    count = cursor.fetchone()[0]
-    if count == 0:
-        seed_events = [
-            (
-                "EVT-BM-01",
-                datetime.now().strftime("%Y-%m-%d 16:18:22"),
-                time.time() - 3600,
-                "Camera 01",
-                "Track-1",
-                "Confirmed Fall Incident",
-                "CRITICAL EMERGENCY",
-                "FALL_CONFIRMED",
-                "FALLBACK_HEURISTIC",
-                "EMERGENCY / ALERT",
-                "Rapid downward collapse (92.1 px/s drop, 13.1s ground dwell). Verified by YOLO11n-Pose & temporal dwell state machine.",
-                "Standing → Rapid Drop (92.1 px/s) → Floor Dwell (13.1s)",
-                0,
-                json.dumps({"drop_velocity": 92.1, "dwell_sec": 13.1, "torso_angle": 78.4, "category": "Fall"}),
-                json.dumps([])
-            ),
-            (
-                "EVT-BM-02",
-                datetime.now().strftime("%Y-%m-%d 16:02:14"),
-                time.time() - 4500,
-                "Camera 01",
-                "Track-1",
-                "System Baseline Initialization",
-                "ROUTINE AUDIT",
-                "STABLE",
-                "NOT_REQUESTED",
-                "NORMAL / LOG",
-                "Edge AI (YOLOv8n + YOLO11n-Pose) initialized on RTX 3050 CUDA. Persistent SQLite and ChromaDB ready.",
-                "Camera 01 Init → Continuous Edge Monitoring",
-                1,
-                json.dumps({"category": "Baseline", "state": "STABLE"}),
-                json.dumps([])
-            ),
-            (
-                "EVT-BM-03",
-                datetime.now().strftime("%Y-%m-%d 15:58:30"),
-                time.time() - 4800,
-                "Camera 01",
-                "Track-1",
-                "Controlled Sitting Transition",
-                "MONITORING NOTICE",
-                "STABLE",
-                "NOT_REQUESTED",
-                "NORMAL / LOG",
-                "Subject seated in armchair. Forward reach detected without vertical drop velocity (0 false alarms).",
-                "Standing → Sitting (Leaning Forward)",
-                1,
-                json.dumps({"category": "Sitting", "torso_angle": 34.2, "drop_velocity": 0.0}),
-                json.dumps([])
-            )
-        ]
-        cursor.executemany("""
-        INSERT INTO events (
-            id, timestamp, timestamp_sec, camera_id, track_id, event_type, severity,
-            detector_status, vlm_status, policy_decision, details, posture_trajectory,
-            acknowledged, metadata_json, frame_paths_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, seed_events)
-        conn.commit()
+    # Production startup: demo-data seeding is DISABLED by default.
+    # Seeding is strictly guarded behind the explicit CAREWATCH_DEMO_MODE=1 flag.
+    demo_mode_enabled = os.getenv("CAREWATCH_DEMO_MODE", "0").lower() in ("1", "true", "yes")
+    
+    if demo_mode_enabled:
+        cursor.execute("SELECT COUNT(*) FROM events")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            seed_events = [
+                (
+                    "EVT-DEMO-01",
+                    datetime.now().strftime("%Y-%m-%d 16:18:22"),
+                    time.time() - 3600,
+                    "Camera 01",
+                    "Track-1",
+                    "[DEMO] Staged Fall Incident",
+                    "DEMO / SYNTHETIC",
+                    "FALL_CONFIRMED",
+                    "RULE_BASED_FALLBACK",
+                    "EMERGENCY / ALERT",
+                    "SYNTHETIC DEMO: Staged collapse (92.1 px/s drop, 13.1s floor dwell).",
+                    "Standing → Rapid Drop (92.1 px/s) → Floor Dwell (13.1s)",
+                    0,
+                    json.dumps({
+                        "drop_velocity": 92.1,
+                        "dwell_sec": 13.1,
+                        "torso_angle": 78.4,
+                        "category": "Fall",
+                        "provenance": "DEMO_SYNTHETIC",
+                        "is_synthetic": True
+                    }),
+                    json.dumps([])
+                ),
+                (
+                    "EVT-DEMO-02",
+                    datetime.now().strftime("%Y-%m-%d 16:02:14"),
+                    time.time() - 4500,
+                    "Camera 01",
+                    "Track-1",
+                    "[DEMO] Baseline Initialization",
+                    "DEMO / SYNTHETIC",
+                    "STABLE",
+                    "NOT_REQUESTED",
+                    "NORMAL / LOG",
+                    "SYNTHETIC DEMO: Edge AI baseline initialized.",
+                    "Camera 01 Init → Continuous Edge Monitoring",
+                    1,
+                    json.dumps({
+                        "category": "Baseline",
+                        "state": "STABLE",
+                        "provenance": "DEMO_SYNTHETIC",
+                        "is_synthetic": True
+                    }),
+                    json.dumps([])
+                )
+            ]
+            cursor.executemany("""
+            INSERT INTO events (
+                id, timestamp, timestamp_sec, camera_id, track_id, event_type, severity,
+                detector_status, vlm_status, policy_decision, details, posture_trajectory,
+                acknowledged, metadata_json, frame_paths_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, seed_events)
+            conn.commit()
 
     conn.close()
 
-def log_event(event: Dict[str, Any]) -> str:
-    conn = get_db_connection()
+def log_event(event: Dict[str, Any], db_path: Optional[str] = None) -> str:
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
     event_id = event.get("id") or f"EVT-{int(time.time()*1000)%1000000}"
@@ -155,8 +156,8 @@ def log_event(event: Dict[str, Any]) -> str:
     conn.close()
     return event_id
 
-def get_events(limit: int = 50, acknowledged: Optional[bool] = None) -> List[Dict[str, Any]]:
-    conn = get_db_connection()
+def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
     query = "SELECT * FROM events"
@@ -172,6 +173,7 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None) -> List[Dic
     
     result = []
     for r in rows:
+        meta = json.loads(r["metadata_json"]) if r["metadata_json"] else {}
         result.append({
             "alert_id": r["id"],
             "id": r["id"],
@@ -188,14 +190,16 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None) -> List[Dic
             "details": r["details"],
             "posture_trajectory": r["posture_trajectory"],
             "acknowledged": bool(r["acknowledged"]),
-            "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
+            "metadata": meta,
+            "provenance": meta.get("provenance", "REAL_PIPELINE"),
+            "is_synthetic": meta.get("is_synthetic", False),
             "frame_paths": json.loads(r["frame_paths_json"]) if r["frame_paths_json"] else []
         })
     conn.close()
     return result
 
-def acknowledge_event_by_id(event_id: str) -> bool:
-    conn = get_db_connection()
+def acknowledge_event_by_id(event_id: str, db_path: Optional[str] = None) -> bool:
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("UPDATE events SET acknowledged = 1 WHERE id = ?", (event_id,))
     updated = cursor.rowcount > 0
@@ -203,8 +207,8 @@ def acknowledge_event_by_id(event_id: str) -> bool:
     conn.close()
     return updated
 
-def log_agent_trace(trace: Dict[str, Any]):
-    conn = get_db_connection()
+def log_agent_trace(trace: Dict[str, Any], db_path: Optional[str] = None):
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("""
     INSERT INTO agent_traces (
@@ -224,8 +228,8 @@ def log_agent_trace(trace: Dict[str, Any]):
     conn.commit()
     conn.close()
 
-def get_recent_agent_traces(limit: int = 10) -> List[Dict[str, Any]]:
-    conn = get_db_connection()
+def get_recent_agent_traces(limit: int = 10, db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM agent_traces ORDER BY rowid DESC LIMIT ?", (limit,))
     rows = cursor.fetchall()

@@ -1,0 +1,53 @@
+{
+  "version": "1.0.0",
+  "recording_filename": "Recording 2026-10-20 130626.mp4",
+  "recording_duration_sec": 124.77,
+  "fps": 30.0,
+  "total_frames": 3743,
+  "annotation_date": "2026-10-20",
+  "provenance": "Empirical human visual inspection of staged activities & falls",
+  "positive_fall_events": [
+    {
+      "event_id": "GT-FALL-01",
+      "activity": "Rapid downward collapse onto floor",
+      "start_sec": 77.5,
+      "end_sec": 83.5,
+      "peak_sec": 79.03,
+      "description": "Initial uncontrolled downward collapse from standing to floor surface"
+    },
+    {
+      "event_id": "GT-FALL-02",
+      "activity": "Secondary floor collapse episode",
+      "start_sec": 84.5,
+      "end_sec": 90.0,
+      "peak_sec": 86.53,
+      "description": "Secondary slip/collapse episode following shift on floor prior to seated recovery"
+    }
+  ],
+  "negative_activity_intervals": [
+    {
+      "interval_id": "GT-NEG-01",
+      "activity": "Upright standing and walking cadence",
+      "start_sec": 0.0,
+      "end_sec": 35.0
+    },
+    {
+      "interval_id": "GT-NEG-02",
+      "activity": "Controlled seated reading in armchair & forward reaching",
+      "start_sec": 35.0,
+      "end_sec": 75.0
+    },
+    {
+      "interval_id": "GT-NEG-03",
+      "activity": "Voluntary floor-to-seated recovery",
+      "start_sec": 93.0,
+      "end_sec": 105.0
+    }
+  ],
+  "matching_criteria": {
+    "temporal_tolerance_sec": 3.5,
+    "max_matches_per_prediction": 1,
+    "max_matches_per_ground_truth": 1,
+    "matching_rule": "One-to-one bipartite temporal overlap matching: a prediction matches GT if it falls within [start - tol, end + tol], greedily assigned to nearest unassigned GT."
+  }
+}

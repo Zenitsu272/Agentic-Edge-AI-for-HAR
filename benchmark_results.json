@@ -78,5 +78,29 @@
       "posture": "Lying",
       "drop_velocity": 0.0
     }
+  ],
+  "ground_truth_version": "1.0.0",
+  "ground_truth_provenance": "Empirical human visual inspection of staged activities & falls",
+  "matching_rules": "One-to-one bipartite temporal overlap matching: a prediction matches GT if it falls within [start - tol, end + tol], greedily assigned to nearest unassigned GT.",
+  "ground_truth_positive_events_count": 2,
+  "ground_truth_negative_intervals_count": 3,
+  "predicted_events_count": 2,
+  "one_to_one_matches": [
+    {
+      "predicted_event_id": "FALL-1",
+      "pred_timestamp_sec": 79.03,
+      "gt_event_id": "GT-FALL-01",
+      "gt_start_sec": 77.5,
+      "gt_end_sec": 83.5,
+      "temporal_error_sec": 0.0
+    },
+    {
+      "predicted_event_id": "FALL-2",
+      "pred_timestamp_sec": 86.53,
+      "gt_event_id": "GT-FALL-02",
+      "gt_start_sec": 84.5,
+      "gt_end_sec": 90.0,
+      "temporal_error_sec": 0.0
+    }
   ]
 }

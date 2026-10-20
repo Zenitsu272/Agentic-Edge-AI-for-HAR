@@ -83,8 +83,9 @@ class EdgeVisionClient {
     this.connectWebSocket();
   }
 
-  async startVideoReplay(file, videoElementId, overlayCanvasId) {
+  async startVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId) {
     this.videoEl = document.getElementById(videoElementId);
+    this.serverFrameEl = document.getElementById(serverFrameId);
     this.overlayCanvas = document.getElementById(overlayCanvasId);
     if (this.overlayCanvas) {
       this.overlayCtx = this.overlayCanvas.getContext('2d');
@@ -95,12 +96,30 @@ class EdgeVisionClient {
       this.stream = null;
     }
 
+    if (this.serverFrameEl) {
+      this.serverFrameEl.style.display = 'none';
+      this.serverFrameEl.src = '';
+    }
+
     if (this.videoEl) {
+      this.videoEl.style.display = 'block';
       this.videoEl.srcObject = null;
       this.videoEl.src = URL.createObjectURL(file);
       this.videoEl.loop = true;
       this.videoEl.muted = true;
-      await this.videoEl.play();
+      
+      this.videoEl.onerror = async () => {
+        console.warn("[EdgeVisionClient] Browser cannot decode video, falling back to server-side OpenCV replay:", file.name);
+        await this.startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId);
+      };
+
+      try {
+        await this.videoEl.play();
+      } catch (e) {
+        console.warn("[EdgeVisionClient] Browser playback error, falling back to server-side OpenCV replay:", e);
+        await this.startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId);
+        return;
+      }
     }
 
     this.isStreaming = true;
@@ -113,8 +132,127 @@ class EdgeVisionClient {
     }
   }
 
+  async startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId) {
+    this.videoEl = document.getElementById(videoElementId);
+    this.serverFrameEl = document.getElementById(serverFrameId);
+    this.overlayCanvas = document.getElementById(overlayCanvasId);
+    if (this.overlayCanvas) {
+      this.overlayCtx = this.overlayCanvas.getContext('2d');
+    }
+
+    if (this.stream) {
+      this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+    }
+
+    if (this.videoEl) {
+      this.videoEl.pause();
+      this.videoEl.style.display = 'none';
+    }
+
+    if (this.serverFrameEl) {
+      this.serverFrameEl.style.display = 'block';
+    }
+
+    const statusBadge = document.getElementById('camStatusBadge');
+    if (statusBadge) {
+      statusBadge.innerText = `● UPLOADING ${file.name.toUpperCase()}...`;
+      statusBadge.className = 'chip chip-amber';
+    }
+
+    // 1. Upload to backend
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch('/api/upload_video', {
+      method: 'POST',
+      body: formData
+    });
+    const uploadData = await res.json();
+    if (uploadData.status !== 'success') {
+      throw new Error(uploadData.message || 'Failed to upload video');
+    }
+
+    // 2. Connect to WebSocket replay stream
+    this.closeWebSocket();
+    this.isStreaming = true;
+    this.isServerReplay = true;
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${location.host}/ws/replay_stream?video=${encodeURIComponent(uploadData.filename)}`;
+    console.log(`[EdgeVisionClient] Connecting server video replay -> ${wsUrl}`);
+    
+    this.ws = new WebSocket(wsUrl);
+
+    this.ws.onopen = () => {
+      console.log(`[EdgeVisionClient] Replay stream connected for ${uploadData.filename}`);
+      if (statusBadge) {
+        statusBadge.innerText = `● REPLAY (${uploadData.format.toUpperCase()} · ${uploadData.resolution}) · RTX 3050 CUDA`;
+        statusBadge.className = 'chip chip-sage';
+      }
+    };
+
+    this.ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          console.error("Replay error:", data.error);
+          return;
+        }
+
+        // Render frame directly onto serverFrameEl
+        if (data.rendered_frame && this.serverFrameEl) {
+          this.serverFrameEl.src = data.rendered_frame;
+        }
+
+        // Handle pipeline output
+        this.handlePipelineResult(data);
+
+        // Draw skeleton onto overlay canvas
+        if (this.overlayCanvas && this.serverFrameEl) {
+          const w = this.serverFrameEl.clientWidth || 480;
+          const h = this.serverFrameEl.clientHeight || 360;
+          if (w > 0 && h > 0) {
+            this.overlayCanvas.width = w;
+            this.overlayCanvas.height = h;
+            this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+
+            const sx = this.overlayCanvas.width / 480.0;
+            const sy = this.overlayCanvas.height / 360.0;
+
+            const s2 = data.stage2_posture;
+            if (s2 && s2.keypoints && s2.keypoints.length > 0) {
+              this.overlayCtx.lineWidth = 2.5;
+              this.overlayCtx.strokeStyle = s2.category === 'Lying' ? '#c85a32' : '#5f806b';
+              for (const [p1, p2] of this.SKELETON_PAIRS) {
+                const pt1 = s2.keypoints[p1];
+                const pt2 = s2.keypoints[p2];
+                if (pt1 && pt2 && pt1[2] > 0.25 && pt2[2] > 0.25) {
+                  this.overlayCtx.beginPath();
+                  this.overlayCtx.moveTo(pt1[0] * sx, pt1[1] * sy);
+                  this.overlayCtx.lineTo(pt2[0] * sx, pt2[1] * sy);
+                  this.overlayCtx.stroke();
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Replay message parse error:", err);
+      }
+    };
+
+    this.ws.onerror = (err) => {
+      console.error("[EdgeVisionClient] Replay WS error:", err);
+    };
+
+    this.ws.onclose = () => {
+      console.log("[EdgeVisionClient] Replay WS closed");
+    };
+  }
+
   stopCamera() {
     this.isStreaming = false;
+    this.isServerReplay = false;
     this.waitingForResponse = false;
     this.closeWebSocket();
 
@@ -127,6 +265,12 @@ class EdgeVisionClient {
       this.videoEl.pause();
       this.videoEl.srcObject = null;
       this.videoEl.removeAttribute('src');
+      this.videoEl.style.display = 'block';
+    }
+
+    if (this.serverFrameEl) {
+      this.serverFrameEl.src = '';
+      this.serverFrameEl.style.display = 'none';
     }
 
     if (this.overlayCtx && this.overlayCanvas) {

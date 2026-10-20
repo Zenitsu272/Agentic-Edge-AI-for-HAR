@@ -145,7 +145,7 @@ function pipelineView() {
             <div class="pmetric"><span>Posture</span><strong id="mPosture">--</strong></div>
             <div class="pmetric"><span>State</span><strong id="mState" class="state-txt">STABLE</strong></div>
             <div class="pmetric pmetric-action">
-              <input type="file" id="videoReplayInput" accept="video/mp4,video/webm" style="display:none;" onchange="handleVideoFile(this)" />
+              <input type="file" id="videoReplayInput" accept="video/*,.avi,.mp4,.webm,.mkv,.mov,.wmv" style="display:none;" onchange="handleVideoFile(this)" />
               <button class="btn-sm btn-primary-sm" onclick="startWebcam()">${icon('camera', 14)} Start</button>
               <button class="btn-sm btn-outline-sm" onclick="triggerVideoReplay()">${icon('activity', 14)} Replay Video</button>
               <button class="btn-sm btn-outline-sm" onclick="stopWebcam()">Stop</button>
@@ -158,9 +158,10 @@ function pipelineView() {
 
           <!-- LEFT: Camera Feed -->
           <div class="pipe-video-col">
-            <div class="video-wrapper" style="aspect-ratio: 4/3;">
+            <div class="video-wrapper" style="aspect-ratio: 4/3; position: relative;">
               <video id="videoFeed" class="video-stream" autoplay playsinline muted></video>
-              <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
+              <img id="serverFrameFeed" class="video-stream" style="display:none; width:100%; height:100%; object-fit:cover; position:absolute; top:0; left:0; z-index:1;" />
+              <canvas id="overlayCanvas" class="overlay-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:2; pointer-events:none;"></canvas>
               <div class="stream-badge"><div class="dot"></div> Camera 01 · Edge Inference</div>
             </div>
             <div id="pipelineAlertBanner" class="alert-banner" style="margin-top: 8px;">
@@ -558,8 +559,16 @@ function triggerVideoReplay() {
 async function handleVideoFile(inputEl) {
   if (inputEl.files && inputEl.files[0]) {
     const file = inputEl.files[0];
+    const fname = file.name.toLowerCase();
+    const isAvi = fname.endsWith('.avi') || file.type.includes('avi') || file.type.includes('msvideo') || fname.endsWith('.mkv') || fname.endsWith('.wmv');
     try {
-      await window.edgeVision.startVideoReplay(file, 'videoFeed', 'overlayCanvas');
+      if (isAvi) {
+        // Direct server-side OpenCV replay for .avi and container formats
+        await window.edgeVision.startServerVideoReplay(file, 'videoFeed', 'serverFrameFeed', 'overlayCanvas');
+      } else {
+        // Try browser-native first, gracefully falling back to server replay if browser codec fails
+        await window.edgeVision.startVideoReplay(file, 'videoFeed', 'serverFrameFeed', 'overlayCanvas');
+      }
     } catch (err) {
       alert("Video replay error: " + err.message);
     }
