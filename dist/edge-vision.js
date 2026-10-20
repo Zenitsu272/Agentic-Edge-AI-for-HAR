@@ -83,6 +83,36 @@ class EdgeVisionClient {
     this.connectWebSocket();
   }
 
+  async startVideoReplay(file, videoElementId, overlayCanvasId) {
+    this.videoEl = document.getElementById(videoElementId);
+    this.overlayCanvas = document.getElementById(overlayCanvasId);
+    if (this.overlayCanvas) {
+      this.overlayCtx = this.overlayCanvas.getContext('2d');
+    }
+
+    if (this.stream) {
+      this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+    }
+
+    if (this.videoEl) {
+      this.videoEl.srcObject = null;
+      this.videoEl.src = URL.createObjectURL(file);
+      this.videoEl.loop = true;
+      this.videoEl.muted = true;
+      await this.videoEl.play();
+    }
+
+    this.isStreaming = true;
+    this.connectWebSocket();
+
+    const statusBadge = document.getElementById('camStatusBadge');
+    if (statusBadge) {
+      statusBadge.innerText = '● REPLAY SIMULATION · RTX 3050 CUDA';
+      statusBadge.className = 'chip chip-sage';
+    }
+  }
+
   stopCamera() {
     this.isStreaming = false;
     this.waitingForResponse = false;
@@ -94,7 +124,9 @@ class EdgeVisionClient {
     }
 
     if (this.videoEl) {
+      this.videoEl.pause();
       this.videoEl.srcObject = null;
+      this.videoEl.removeAttribute('src');
     }
 
     if (this.overlayCtx && this.overlayCanvas) {
@@ -103,7 +135,7 @@ class EdgeVisionClient {
 
     const statusBadge = document.getElementById('camStatusBadge');
     if (statusBadge) {
-      statusBadge.innerText = 'WEBCAM OFFLINE';
+      statusBadge.innerText = 'STREAM OFFLINE';
       statusBadge.style.color = '#7a847f';
     }
   }

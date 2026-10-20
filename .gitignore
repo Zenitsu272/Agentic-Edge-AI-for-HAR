@@ -41,3 +41,4 @@ chroma_db/
 .idea/
 .DS_Store
 Thumbs.db
+*.db

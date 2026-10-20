@@ -8,6 +8,9 @@ import cv2
 import torch
 from ultralytics import YOLO
 
+import database
+from tracker import CentroidTracker
+
 class InferencePipeline:
     def __init__(self):
         self.device = 0 if torch.cuda.is_available() else "cpu"
@@ -26,6 +29,9 @@ class InferencePipeline:
 
         # Real motion flux tracking (grayscale frame differencing)
         self.prev_gray_frame = None
+
+        # Multi-person centroid tracker with track history and displacement metrics
+        self.tracker = CentroidTracker(max_missed_frames=15, max_distance=120.0)
 
         # Rolling frame buffer (Stage 2 -> Stage 3 packaging)
         self.frame_buffer = deque(maxlen=45)
@@ -85,7 +91,7 @@ class InferencePipeline:
         now = t0
         self.frame_buffer.append(frame)
 
-        # --- STAGE 1: PERSON PRESENCE & MOTION FLUX ---
+        # --- STAGE 1: PERSON PRESENCE, TRACKING & MOTION ---
         flux_pct, motion_active = self.compute_motion_flux(frame)
         motion_results = self.motion_model.predict(frame, classes=[0], conf=0.35, device=self.device, verbose=False)
         
@@ -105,6 +111,17 @@ class InferencePipeline:
                 })
 
         person_present = persons_count > 0
+        
+        # Track persons across frames using centroid tracker
+        tracker_inputs = [{"box": [b["x1"], b["y1"], b["x2"], b["y2"]], "conf": b["conf"]} for b in boxes]
+        active_tracks = self.tracker.update(tracker_inputs, now)
+        
+        primary_track = active_tracks[0] if active_tracks else None
+        track_id_str = f"Track #{primary_track.track_id}" if primary_track else "None"
+        movement_status = primary_track.movement_status if primary_track else ("Stationary" if person_present else "Idle")
+        displacement_px_s = round(primary_track.displacement_px_sec, 1) if primary_track else 0.0
+        norm_disp = round(primary_track.normalized_displacement, 3) if primary_track else 0.0
+        self.current_track_id = track_id_str
 
         # --- STAGE 2: BIOMECHANICAL POSTURE ESTIMATION ---
         posture = "Awaiting Subject"
@@ -169,9 +186,14 @@ class InferencePipeline:
             "stage1_presence": {
                 "person_present": person_present,
                 "persons_count": persons_count,
+                "track_id": track_id_str,
+                "active_tracks_count": len(active_tracks),
                 "motion_flux_pct": flux_pct,
                 "motion_active": motion_active,
-                "status_text": "PERSON DETECTED" if person_present else "SCENE IDLE",
+                "movement_status": movement_status,
+                "displacement_px_sec": displacement_px_s,
+                "normalized_displacement": norm_disp,
+                "status_text": f"PERSON DETECTED ({track_id_str})" if person_present else "SCENE IDLE",
                 "boxes": boxes
             },
             "stage2_posture": {
@@ -366,6 +388,32 @@ class InferencePipeline:
                     "acknowledged": False
                 }
                 print(f"[TemporalStateMachine] *** EMERGENCY: Fall Confirmed! Alert {self.active_alert['alert_id']} logged. ***")
+                
+                # Persist to SQLite relational database
+                try:
+                    database.log_event({
+                        "id": self.active_alert["alert_id"],
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "timestamp_sec": now,
+                        "camera_id": "Camera 01",
+                        "track_id": getattr(self, "current_track_id", "Track-1"),
+                        "event_type": "Confirmed Fall Incident",
+                        "severity": "CRITICAL EMERGENCY",
+                        "detector_status": "FALL_CONFIRMED",
+                        "vlm_status": "PENDING_VERIFICATION",
+                        "policy_decision": "EMERGENCY / ALERT",
+                        "details": self.active_alert["details"],
+                        "posture_trajectory": self.active_alert["posture_trajectory"],
+                        "acknowledged": False,
+                        "metadata": {
+                            "drop_velocity": round(float(drop_velocity), 1),
+                            "dwell_sec": round(float(dwell_time), 1),
+                            "posture": posture_label,
+                            "torso_angle": round(float(torso_angle), 1)
+                        }
+                    })
+                except Exception as ex:
+                    print("[TemporalStateMachine] Database event log error:", ex)
 
         elif self.state == "FALL_CONFIRMED":
             dwell_time = now - self.confirmed_fall_time if self.confirmed_fall_time else 0.0

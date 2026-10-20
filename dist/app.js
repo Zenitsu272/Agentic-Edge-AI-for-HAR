@@ -145,7 +145,9 @@ function pipelineView() {
             <div class="pmetric"><span>Posture</span><strong id="mPosture">--</strong></div>
             <div class="pmetric"><span>State</span><strong id="mState" class="state-txt">STABLE</strong></div>
             <div class="pmetric pmetric-action">
+              <input type="file" id="videoReplayInput" accept="video/mp4,video/webm" style="display:none;" onchange="handleVideoFile(this)" />
               <button class="btn-sm btn-primary-sm" onclick="startWebcam()">${icon('camera', 14)} Start</button>
+              <button class="btn-sm btn-outline-sm" onclick="triggerVideoReplay()">${icon('activity', 14)} Replay Video</button>
               <button class="btn-sm btn-outline-sm" onclick="stopWebcam()">Stop</button>
             </div>
           </div>
@@ -336,7 +338,7 @@ async function searchChromaMemory() {
 }
 
 // =================== MEASURED BENCHMARK VIEW =================
-function benchmarkView() {
+async function benchmarkView() {
   activeView = 'benchmark';
   if (window.edgeVision) window.edgeVision.stopCamera();
 
@@ -344,38 +346,39 @@ function benchmarkView() {
     <div class="workspace">
       ${sidebar()}
       <main class="main">
-        ${topbar('Measured Benchmark Evaluation', 'Empirical performance on real staged sequence (Recording 2026-10-20 130626.mp4) on RTX 3050 CUDA.')}
+        ${topbar('Measured Benchmark Evaluation', 'Empirical performance on real staged sequence on RTX 3050 CUDA.')}
 
         <section class="surface">
           <div class="surface-header">
             <div>
-              <h2>Benchmark Dataset: ${measuredBenchmark.sequence}</h2>
-              <p>Evaluated with end-to-end Person Presence, Pose Estimation, and Temporal State Machine</p>
+              <h2 id="benchDatasetTitle">Benchmark Dataset: Loading empirical results...</h2>
+              <p id="benchDatasetDesc">Evaluating end-to-end Person Presence, Pose Estimation, and Temporal State Machine</p>
             </div>
-            <span class="badge stable">100% RECALL & PRECISION</span>
+            <span id="benchBadge" class="badge stable">CALCULATING</span>
           </div>
 
           <div class="bench-grid">
-            <div class="bench-card"><span>Event Precision</span><strong style="color: var(--sage);">${measuredBenchmark.precision}</strong></div>
-            <div class="bench-card"><span>Event Recall</span><strong style="color: var(--sage);">${measuredBenchmark.recall}</strong></div>
-            <div class="bench-card"><span>False Alarms (Sitting / Lean)</span><strong style="color: var(--sage);">${measuredBenchmark.falsePositivesSitting}</strong></div>
-            <div class="bench-card"><span>F1-Score</span><strong style="color: var(--sage);">${measuredBenchmark.f1}</strong></div>
+            <div class="bench-card"><span>Event Precision</span><strong id="bPrecision" style="color: var(--sage);">--%</strong></div>
+            <div class="bench-card"><span>Event Recall</span><strong id="bRecall" style="color: var(--sage);">--%</strong></div>
+            <div class="bench-card"><span>False Alarms (Sitting/Lean)</span><strong id="bFalsePos" style="color: var(--sage);">--</strong></div>
+            <div class="bench-card"><span>F1-Score</span><strong id="bF1" style="color: var(--sage);">--%</strong></div>
           </div>
 
           <div class="bench-grid" style="margin-top: 14px;">
-            <div class="bench-card"><span>Evaluated Frames</span><strong>${measuredBenchmark.frames.toLocaleString()}</strong></div>
-            <div class="bench-card"><span>Clip Duration</span><strong>${measuredBenchmark.duration}</strong></div>
-            <div class="bench-card"><span>Avg Pipeline Latency</span><strong style="color: var(--clay);">${measuredBenchmark.latency}</strong></div>
-            <div class="bench-card"><span>Throughput</span><strong style="color: var(--clay);">${measuredBenchmark.throughput}</strong></div>
+            <div class="bench-card"><span>Evaluated Frames</span><strong id="bFrames">--</strong></div>
+            <div class="bench-card"><span>Clip Duration</span><strong id="bDuration">--</strong></div>
+            <div class="bench-card"><span>Avg Pipeline Latency</span><strong id="bLatency" style="color: var(--clay);">-- ms</strong></div>
+            <div class="bench-card"><span>Throughput</span><strong id="bThroughput" style="color: var(--clay);">-- FPS</strong></div>
           </div>
 
           <div style="margin-top: 24px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: white;">
             <h3 style="margin: 0 0 10px; font-size: 15px;">Hardware & Test Configuration Details</h3>
-            <div class="stat-item"><span>Target Hardware</span><strong>${measuredBenchmark.hardware}</strong></div>
-            <div class="stat-item"><span>Temporal Verification Dwell</span><strong>${measuredBenchmark.detectionDelay} debounce window</strong></div>
-            <div class="stat-item"><span>Sitting / Forward Lean Stability</span><strong style="color: var(--sage);">0 false alarms during entire 35s–70s seated period</strong></div>
+            <div class="stat-item"><span>Target Hardware</span><strong id="bHardware">--</strong></div>
+            <div class="stat-item"><span>P95 Tail Latency</span><strong id="bTailLatency">-- ms</strong></div>
+            <div class="stat-item"><span>Temporal Verification Dwell</span><strong id="bDelay">1.5s debounce window</strong></div>
+            <div class="stat-item"><span>Sitting / Forward Lean Stability</span><strong style="color: var(--sage);">0 false alarms during seated reading period</strong></div>
             <div class="stat-item"><span>Floor Lying Classification</span><strong>Properly tagged as Lying/Resting without false fall alert</strong></div>
-            <div class="stat-item"><span>True Fall Detections</span><strong style="color: var(--clay);">Both collapse events verified at 79.0s and 86.5s</strong></div>
+            <div class="stat-item"><span>True Fall Detections</span><strong id="bFallsDetected" style="color: var(--clay);">2 confirmed collapse events</strong></div>
           </div>
         </section>
       </main>
@@ -383,6 +386,31 @@ function benchmarkView() {
   `;
 
   bindEvents();
+
+  try {
+    const res = await fetch('/api/benchmark');
+    const data = await res.json();
+    if (data.status === 'success' && data.benchmark) {
+      const b = data.benchmark;
+      document.getElementById('benchDatasetTitle').innerText = `Benchmark Dataset: ${b.dataset_name}`;
+      document.getElementById('benchDatasetDesc').innerText = b.dataset_description || 'Staged empirical evaluation';
+      document.getElementById('benchBadge').innerText = `${b.event_level_precision_pct}% RECALL & PRECISION`;
+      document.getElementById('bPrecision').innerText = `${b.event_level_precision_pct}%`;
+      document.getElementById('bRecall').innerText = `${b.event_level_recall_pct}%`;
+      document.getElementById('bFalsePos').innerText = `${b.false_alerts_during_sitting_or_leaning}`;
+      document.getElementById('bF1').innerText = `${b.event_level_f1_pct}%`;
+      document.getElementById('bFrames').innerText = b.total_frames_evaluated.toLocaleString();
+      document.getElementById('bDuration').innerText = `${b.video_duration_sec}s`;
+      document.getElementById('bLatency').innerText = `${b.avg_inference_latency_ms} ms`;
+      document.getElementById('bThroughput').innerText = `${b.effective_throughput_fps} FPS`;
+      document.getElementById('bHardware').innerText = b.hardware;
+      document.getElementById('bTailLatency').innerText = `${b.p95_tail_latency_ms || b.median_latency_ms} ms`;
+      document.getElementById('bDelay').innerText = `${b.detection_delay_sec || 1.5}s debounce window`;
+      document.getElementById('bFallsDetected').innerText = `${b.true_positives} of ${b.ground_truth_events} verified events (TP=${b.true_positives}, FP=${b.false_positives}, FN=${b.false_negatives})`;
+    }
+  } catch (err) {
+    console.error("Error loading benchmark:", err);
+  }
 }
 
 // ================ RENDER ALERT CARDS =================
@@ -395,36 +423,53 @@ function renderAlertCards() {
     `;
   }
   return liveAlerts.map(a => `
-    <div class="alert-card ${a.severity.includes('CRITICAL') ? 'critical' : ''} ${a.acknowledged ? 'acknowledged' : ''}">
+    <div class="alert-card ${a.severity && a.severity.includes('CRITICAL') ? 'critical' : ''} ${a.acknowledged ? 'acknowledged' : ''}">
       <div class="alert-card-top">
-        <strong style="font-size: 13px; color: ${a.severity.includes('CRITICAL') ? '#8e4837' : 'var(--ink)'};">
-          ${a.type}
+        <strong style="font-size: 13px; color: ${a.severity && a.severity.includes('CRITICAL') ? '#8e4837' : 'var(--ink)'};">
+          ${a.type || 'Incident Event'}
         </strong>
-        <span class="badge ${a.severity.includes('CRITICAL') ? 'review' : 'stable'}" style="font-size: 10px;">
-          ${a.severity}
+        <span class="badge ${a.severity && a.severity.includes('CRITICAL') ? 'review' : 'stable'}" style="font-size: 10px;">
+          ${a.severity || 'NOTICE'}
         </span>
       </div>
       <div style="font-size: 12px; color: var(--ink-soft); line-height: 1.4;">
-        ${a.details}
+        ${a.details || ''}
       </div>
       <div class="alert-card-meta">
-        <span>🕒 ${a.timestamp}</span>
-        <span>ID: ${a.alert_id}</span>
-        <span>${a.posture_trajectory}</span>
+        <span>🕒 ${a.timestamp || ''}</span>
+        <span>ID: ${a.alert_id || a.id}</span>
+        <span>${a.posture_trajectory || ''}</span>
       </div>
       <div class="alert-card-action">
         ${a.acknowledged ?
-          `<span style="color: var(--sage); font-size: 11px; font-weight: 700;">✓ Acknowledged</span>` :
-          `<button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="acknowledgeAlert('${a.alert_id}')">Acknowledge</button>`
+          `<span style="color: var(--sage); font-size: 11px; font-weight: 700;">✓ Acknowledged (Persisted in SQLite)</span>` :
+          `<button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="acknowledgeAlert('${a.alert_id || a.id}')">Acknowledge</button>`
         }
       </div>
     </div>
   `).join('');
 }
 
+async function loadPersistedAlerts() {
+  try {
+    const res = await fetch('/api/alerts');
+    const data = await res.json();
+    if (data.alerts && data.alerts.length > 0) {
+      liveAlerts = data.alerts;
+      const feed = document.getElementById('pipelineAlertFeed');
+      const badge = document.getElementById('alertCountBadge');
+      if (feed) feed.innerHTML = renderAlertCards();
+      if (badge) badge.innerText = `${liveAlerts.length} Events`;
+    }
+  } catch (err) {
+    console.warn("Could not fetch persisted alerts:", err);
+  }
+}
+
 window.recordAlertEvent = function(alertObj) {
   if (!alertObj) return;
-  const existing = liveAlerts.find(a => a.alert_id === alertObj.alert_id);
+  const aid = alertObj.alert_id || alertObj.id;
+  const existing = liveAlerts.find(a => (a.alert_id === aid || a.id === aid));
   if (!existing) {
     liveAlerts.unshift(alertObj);
     const feed = document.getElementById('pipelineAlertFeed');
@@ -435,11 +480,11 @@ window.recordAlertEvent = function(alertObj) {
 };
 
 async function acknowledgeAlert(alertId) {
-  const alertItem = liveAlerts.find(a => a.alert_id === alertId);
+  const alertItem = liveAlerts.find(a => (a.alert_id === alertId || a.id === alertId));
   if (alertItem) {
     alertItem.acknowledged = true;
     try {
-      await fetch('/api/acknowledge_alert', { method: 'POST' });
+      await fetch(`/api/alerts/${encodeURIComponent(alertId)}/acknowledge`, { method: 'POST' });
     } catch (e) {
       console.warn("Acknowledge fetch error:", e);
     }
@@ -450,7 +495,7 @@ async function acknowledgeAlert(alertId) {
 }
 
 // ================== DEDICATED ALERTS VIEW ==================
-function alertsView() {
+async function alertsView() {
   activeView = 'alerts';
 
   app.innerHTML = `
@@ -462,7 +507,7 @@ function alertsView() {
           <div class="surface-header">
             <div>
               <h2>Audit Log Feed (${liveAlerts.length} Total Events)</h2>
-              <p>Chronological record with posture trajectories and timestamps</p>
+              <p>Chronological record with posture trajectories and persistent SQLite storage</p>
             </div>
             <button class="btn btn-primary" onclick="pipelineView()">
               ${icon('layers')} View Live Pipeline
@@ -478,6 +523,11 @@ function alertsView() {
   `;
 
   bindEvents();
+  await loadPersistedAlerts();
+  const alertCardsContainer = document.querySelector('.surface > div[style*="display: grid"]');
+  if (alertCardsContainer) {
+    alertCardsContainer.innerHTML = renderAlertCards();
+  }
 }
 
 function bindEvents() {
@@ -500,11 +550,28 @@ async function startWebcam() {
   }
 }
 
+function triggerVideoReplay() {
+  const input = document.getElementById('videoReplayInput');
+  if (input) input.click();
+}
+
+async function handleVideoFile(inputEl) {
+  if (inputEl.files && inputEl.files[0]) {
+    const file = inputEl.files[0];
+    try {
+      await window.edgeVision.startVideoReplay(file, 'videoFeed', 'overlayCanvas');
+    } catch (err) {
+      alert("Video replay error: " + err.message);
+    }
+  }
+}
+
 function stopWebcam() {
   if (window.edgeVision) {
     window.edgeVision.stopCamera();
   }
 }
 
-// Initial start on unified pipeline
+// Initial start on unified pipeline and load SQLite alerts
 pipelineView();
+loadPersistedAlerts();
