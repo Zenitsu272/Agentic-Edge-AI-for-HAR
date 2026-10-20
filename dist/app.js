@@ -173,9 +173,10 @@ function pipelineView() {
                 </div>
               </div>
 
-              <div class="video-container">
-                <video id="videoFeed" autoplay playsinline muted></video>
-                <canvas id="overlayCanvas"></canvas>
+              <div class="video-wrapper">
+                <video id="videoFeed" class="video-stream" autoplay playsinline muted></video>
+                <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
+                <div class="stream-badge"><div class="dot"></div> Camera 01 · Live Edge Feed</div>
               </div>
 
               <div id="pipelineAlertBanner" class="alert-banner">

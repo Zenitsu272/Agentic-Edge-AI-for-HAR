@@ -398,17 +398,18 @@ class EdgeVisionClient {
           }
         });
 
-        // Un-mirrored Live Header Badge over resident
+        // Header Badge over subject
         const headPt = kpts[0];
         if (headPt && headPt[2] > 0.15) {
           const hx = headPt[0] * sx;
-          const hy = Math.max(30, (headPt[1] * sy) - 25);
+          const hy = Math.max(30, (headPt[1] * sy) - 20);
           this.overlayCtx.save();
           this.overlayCtx.translate(hx, hy);
-          this.overlayCtx.scale(-1, 1);
+          this.overlayCtx.scale(-1, 1); // Compensates for CSS scaleX(-1) so text reads left-to-right
           this.overlayCtx.fillStyle = themeColor;
-          this.overlayCtx.font = "bold 15px Inter, sans-serif";
-          this.overlayCtx.fillText(`${s2.posture} · [${s3.state}]`, -40, 0);
+          this.overlayCtx.font = "600 14px Inter, system-ui, sans-serif";
+          this.overlayCtx.textAlign = "center";
+          this.overlayCtx.fillText(`${s2.posture} · [${s3.state}]`, 0, 0);
           this.overlayCtx.restore();
         }
       }
