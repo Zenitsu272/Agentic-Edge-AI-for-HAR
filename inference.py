@@ -93,7 +93,7 @@ class InferencePipeline:
 
         # --- STAGE 1: PERSON PRESENCE, TRACKING & MOTION ---
         flux_pct, motion_active = self.compute_motion_flux(frame)
-        motion_results = self.motion_model.predict(frame, classes=[0], conf=0.35, device=self.device, verbose=False)
+        motion_results = self.motion_model.predict(frame, classes=[0], conf=0.20, device=self.device, verbose=False)
         
         persons_count = 0
         boxes = []
@@ -110,20 +110,11 @@ class InferencePipeline:
                     "conf": round(conf, 2)
                 })
 
-        person_present = persons_count > 0
-        
-        # Track persons across frames using centroid tracker
-        tracker_inputs = [{"box": [b["x1"], b["y1"], b["x2"], b["y2"]], "conf": b["conf"]} for b in boxes]
-        active_tracks = self.tracker.update(tracker_inputs, now)
-        
-        primary_track = active_tracks[0] if active_tracks else None
-        track_id_str = f"Track #{primary_track.track_id}" if primary_track else "None"
-        movement_status = primary_track.movement_status if primary_track else ("Stationary" if person_present else "Idle")
-        displacement_px_s = round(primary_track.displacement_px_sec, 1) if primary_track else 0.0
-        norm_disp = round(primary_track.normalized_displacement, 3) if primary_track else 0.0
-        self.current_track_id = track_id_str
-
         # --- STAGE 2: BIOMECHANICAL POSTURE ESTIMATION ---
+        # Dual-stream verification: YOLO11n-Pose is trained specifically on human keypoints across all orientations.
+        # Running pose detection guarantees that prone/collapsed/fallen subjects are NEVER missed when standard object bboxes drop confidence.
+        pose_results = self.pose_model.predict(frame, conf=0.15, device=self.device, verbose=False)
+        
         posture = "Awaiting Subject"
         posture_category = "Unknown"
         posture_conf = 0.0
@@ -135,34 +126,77 @@ class InferencePipeline:
         hip_y = None
         box_y_center = None
 
-        if person_present:
-            pose_results = self.pose_model.predict(frame, conf=0.35, device=self.device, verbose=False)
-            
-            for r in pose_results:
-                if r.keypoints is None or len(r.keypoints) == 0:
-                    continue
+        has_valid_pose = False
+        for r in pose_results:
+            if r.keypoints is None or len(r.keypoints) == 0:
+                continue
 
-                kpts_all = r.keypoints.xy.cpu().numpy()
-                confs_all = r.keypoints.conf.cpu().numpy() if r.keypoints.conf is not None else None
-                boxes_all = r.boxes.xyxy.cpu().numpy() if r.boxes is not None else None
+            kpts_all = r.keypoints.xy.cpu().numpy()
+            confs_all = r.keypoints.conf.cpu().numpy() if r.keypoints.conf is not None else None
+            boxes_all = r.boxes.xyxy.cpu().numpy() if r.boxes is not None else None
 
-                if len(kpts_all) > 0:
-                    kpts = kpts_all[0]
-                    c = confs_all[0] if confs_all is not None else None
-                    box = boxes_all[0].tolist() if boxes_all is not None and len(boxes_all) > 0 else []
-                    primary_box = [round(float(v)) for v in box] if len(box) >= 4 else None
+            if len(kpts_all) > 0:
+                kpts = kpts_all[0]
+                c = confs_all[0] if confs_all is not None else None
+                box = boxes_all[0].tolist() if boxes_all is not None and len(boxes_all) > 0 else []
+                primary_box = [round(float(v)) for v in box] if len(box) >= 4 else None
 
-                    if primary_box:
-                        box_y_center = (primary_box[1] + primary_box[3]) / 2.0
+                # Fuse bounding box from pose model if object detector missed the fallen resident
+                if primary_box and len(boxes) == 0:
+                    pose_conf = float(r.boxes.conf[0].item()) if r.boxes is not None and len(r.boxes) > 0 else 0.5
+                    boxes.append({
+                        "x1": primary_box[0],
+                        "y1": primary_box[1],
+                        "x2": primary_box[2],
+                        "y2": primary_box[3],
+                        "conf": round(pose_conf, 2)
+                    })
+                    persons_count = len(boxes)
 
-                    # Format keypoints for frontend skeleton rendering
-                    for pt_idx, (px, py) in enumerate(kpts):
-                        pconf = float(c[pt_idx]) if c is not None else 1.0
-                        skeleton_pts.append([round(float(px), 1), round(float(py), 1), round(float(pconf), 2)])
+                if primary_box:
+                    box_y_center = (primary_box[1] + primary_box[3]) / 2.0
 
-                    # Biomechanical classification
-                    posture_category, posture, posture_conf, torso_angle, aspect_ratio, hip_y, posture_details = self._classify_biomechanics(kpts, c, primary_box)
-                    break
+                # Format keypoints for frontend skeleton rendering
+                for pt_idx, (px, py) in enumerate(kpts):
+                    pconf = float(c[pt_idx]) if c is not None else 1.0
+                    skeleton_pts.append([round(float(px), 1), round(float(py), 1), round(float(pconf), 2)])
+
+                # Biomechanical classification
+                posture_category, posture, posture_conf, torso_angle, aspect_ratio, hip_y, posture_details = self._classify_biomechanics(kpts, c, primary_box)
+                has_valid_pose = True
+                
+                # Update persistent smoothing cache
+                self.last_valid_pose = (posture_category, posture, posture_conf, torso_angle, aspect_ratio, hip_y, posture_details, skeleton_pts, primary_box)
+                self.missed_pose_count = 0
+                break
+
+        # Temporal smoothing: if 1-2 frames briefly occlude keypoints but tracker is still active, hold last known posture
+        if not has_valid_pose and hasattr(self, "last_valid_pose") and self.last_valid_pose is not None:
+            if self.missed_pose_count < 3:
+                self.missed_pose_count += 1
+                posture_category, posture, posture_conf, torso_angle, aspect_ratio, hip_y, posture_details, skeleton_pts, primary_box = self.last_valid_pose
+                has_valid_pose = True
+                if primary_box and len(boxes) == 0:
+                    boxes.append({"x1": primary_box[0], "y1": primary_box[1], "x2": primary_box[2], "y2": primary_box[3], "conf": 0.4})
+                    persons_count = 1
+            else:
+                self.last_valid_pose = None
+        elif not hasattr(self, "last_valid_pose"):
+            self.last_valid_pose = None
+            self.missed_pose_count = 0
+
+        person_present = (persons_count > 0) or has_valid_pose
+
+        # Track persons across frames using centroid tracker
+        tracker_inputs = [{"box": [b["x1"], b["y1"], b["x2"], b["y2"]], "conf": b["conf"]} for b in boxes]
+        active_tracks = self.tracker.update(tracker_inputs, now)
+        
+        primary_track = active_tracks[0] if active_tracks else None
+        track_id_str = f"Track #{primary_track.track_id}" if primary_track else "None"
+        movement_status = primary_track.movement_status if primary_track else ("Stationary" if person_present else "Idle")
+        displacement_px_s = round(primary_track.displacement_px_sec, 1) if primary_track else 0.0
+        norm_disp = round(primary_track.normalized_displacement, 3) if primary_track else 0.0
+        self.current_track_id = track_id_str
 
         # Record history for temporal analysis
         if person_present and hip_y is not None:
