@@ -13,8 +13,8 @@ from tracker import CentroidTracker
 
 class InferencePipeline:
     def __init__(self):
-        self.device = 0 if torch.cuda.is_available() else "cpu"
-        print(f"[InferencePipeline] Target Device: {self.device} (CUDA available: {torch.cuda.is_available()})")
+        self.device = "cpu"
+        print(f"[InferencePipeline] Target Device: CPU (YOLO models running on CPU to preserve VRAM for Qwen2.5-VL VLM on GPU)")
         print("[InferencePipeline] Loading YOLOv8n (Person Presence) & YOLO11n-Pose (Biomechanics)...")
         
         # Stage 1: Person presence gate
@@ -22,10 +22,9 @@ class InferencePipeline:
         # Stage 2: Biomechanical 17-keypoint Human Activity & Posture model
         self.pose_model = YOLO("yolo11n-pose.pt")
         
-        if self.device == 0:
-            self.motion_model.to("cuda")
-            self.pose_model.to("cuda")
-        print("[InferencePipeline] Models initialized successfully on GPU.")
+        self.motion_model.to("cpu")
+        self.pose_model.to("cpu")
+        print("[InferencePipeline] Models initialized successfully on CPU.")
 
         # Real motion flux tracking (grayscale frame differencing)
         self.prev_gray_frame = None

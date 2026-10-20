@@ -5,6 +5,7 @@ import asyncio
 import base64
 from typing import Optional, List, Dict
 from pathlib import Path
+import torch
 import cv2
 from pydantic import BaseModel
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, File, UploadFile
@@ -83,9 +84,10 @@ def get_system_health():
         "status": aggregate_status,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "hardware": {
-            "device": "cuda:0" if pipeline.device == 0 else "cpu",
-            "device_name": "NVIDIA GeForce RTX 3050 6GB Laptop GPU" if pipeline.device == 0 else "CPU",
-            "cuda_available": (pipeline.device == 0)
+            "yolo_device": "CPU",
+            "vlm_device": getattr(vlm_adapter, "device", "cuda:0"),
+            "gpu_name": "NVIDIA GeForce RTX 3050 6GB Laptop GPU" if torch.cuda.is_available() else "None",
+            "cuda_available": torch.cuda.is_available()
         },
         "components": {
             "video_capture": {
@@ -95,16 +97,17 @@ def get_system_health():
             "person_detector": {
                 "model": "YOLOv8n (Person Presence Gate)",
                 "status": "ONLINE",
-                "device": "CUDA" if pipeline.device == 0 else "CPU"
+                "device": "CPU"
             },
             "pose_estimator": {
                 "model": "YOLO11n-Pose (17 COCO Keypoints)",
                 "status": "ONLINE",
-                "device": "CUDA" if pipeline.device == 0 else "CPU"
+                "device": "CPU"
             },
             "vlm_provider": {
                 "model": vlm_adapter.model_name,
                 "status": vlm_health,
+                "device": getattr(vlm_adapter, "device", "cuda:0"),
                 "detail": vlm_adapter.status_detail,
                 "verification_mode": "VLM_MODEL" if vlm_adapter.status == "ONLINE" else "RULE_BASED_FALLBACK"
             },
