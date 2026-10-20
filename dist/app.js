@@ -192,33 +192,24 @@ function pipelineView() {
               </div>
             </div>
 
-            <!-- STAGE 2 -->
+            <!-- STAGE 2+3 COMBINED: Posture + Temporal State -->
             <div class="out-card">
               <div class="out-card-hdr">
                 <span class="stage-num">2</span>
-                <span class="out-card-title">Biomechanical Posture Estimation</span>
+                <span class="out-card-title">Posture & Temporal State</span>
                 <span id="pPostureBadge" class="chip chip-sage">Standing</span>
+                <span id="pStateBadge" class="chip chip-muted" style="margin-left:4px;">STABLE</span>
               </div>
               <div class="out-rows">
                 <div class="out-row"><span>Posture</span><strong id="pPostureText">Standing</strong></div>
                 <div class="out-row"><span>Torso Angle</span><strong id="pTorsoAngle">0.0°</strong></div>
                 <div class="out-row"><span>BBox Aspect</span><strong id="pAspectRatio">0.0</strong></div>
-              </div>
-            </div>
-
-            <!-- STAGE 3 -->
-            <div class="out-card">
-              <div class="out-card-hdr">
-                <span class="stage-num">3</span>
-                <span class="out-card-title">Temporal Fall State Machine</span>
-                <span id="pStateBadge" class="chip chip-sage">STABLE</span>
-              </div>
-              <div class="out-rows">
-                <div class="out-row"><span>Current State</span><strong id="pStateText" style="color:var(--clay)">Normal Monitoring (Stable)</strong></div>
+                <div class="out-row out-divider"><span>State</span><strong id="pStateText" style="color:var(--clay)">Normal Monitoring (Stable)</strong></div>
                 <div class="out-row"><span>Drop Velocity</span><strong id="pDropVelocity">0.0 px/s</strong></div>
                 <div class="out-row"><span>Floor Dwell</span><strong id="pGroundDwell">0.0 s</strong></div>
               </div>
             </div>
+
 
             <!-- STAGE 4: VLM + ChromaDB -->
             <div class="out-card out-card-central">
