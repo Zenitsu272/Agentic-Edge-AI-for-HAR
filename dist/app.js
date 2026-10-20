@@ -117,196 +117,125 @@ function topbar(title, subtitle) {
   `;
 }
 
-function metricStrip() {
-  return `
-    <div class="metric-strip">
-      <div class="metric-item">
-        <span>Inference Latency</span>
-        <strong id="mLatency">-- ms</strong>
-      </div>
-      <div class="metric-item">
-        <span>Person Presence</span>
-        <strong id="mPresence">Idle</strong>
-      </div>
-      <div class="metric-item">
-        <span>Estimated Posture</span>
-        <strong id="mPosture">Standing</strong>
-      </div>
-      <div class="metric-item">
-        <span>Temporal State</span>
-        <strong id="mState" style="color: var(--clay);">STABLE</strong>
-      </div>
-    </div>
-  `;
-}
-
-// ----------------- UNIFIED 1-PAGE PIPELINE VIEW -----------------
+// ========== COMPACT SINGLE-VIEWPORT PIPELINE VIEW ==========
 function pipelineView() {
   activeView = 'pipeline';
 
   app.innerHTML = `
     <div class="workspace">
       ${sidebar()}
-      <main class="main">
-        ${topbar('Live Activity & Fall Detection Pipeline', 'Unified Edge AI Pipeline (Person Gate + Biomechanics + Temporal Machine) & Central AI Server.')}
-        ${metricStrip()}
+      <main class="main pipeline-main">
 
-        <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; margin-top: 14px;">
-          
-          <!-- Left Column: Camera + Central Reasoning -->
-          <div style="display: flex; flex-direction: column; gap: 16px;">
-            
-            <!-- CAMERA FEED & OVERLAY -->
-            <section class="surface" style="padding: 16px;">
-              <div class="surface-header" style="margin-bottom: 12px;">
-                <div>
-                  <h2>Edge Camera Stream (Camera 01)</h2>
-                  <p>Real-time edge ingestion · YOLOv8n Presence & YOLO11n-Pose</p>
-                </div>
-                <div style="display: flex; gap: 8px;">
-                  <button class="btn btn-primary" onclick="startWebcam()">
-                    ${icon('camera')} Start Stream
-                  </button>
-                  <button class="btn btn-outline" onclick="stopWebcam()">
-                    Stop
-                  </button>
-                </div>
-              </div>
+        <!-- TOP BAR: slim title + global status chips -->
+        <div class="pipe-topbar">
+          <div class="pipe-title-row">
+            <div>
+              <div class="eyebrow">CareWatch Edge AI Platform · Camera 01</div>
+              <h1 class="pipe-h1">Live Detection Pipeline</h1>
+            </div>
+            <div class="pipe-status-chips">
+              <span id="camStatusBadge" class="chip chip-sage">● STREAM LIVE · RTX 3050 CUDA</span>
+              <span id="globalStateBadge" class="chip chip-muted">STABLE</span>
+            </div>
+          </div>
+          <!-- Inline metric bar -->
+          <div class="pipe-metric-bar">
+            <div class="pmetric"><span>Latency</span><strong id="mLatency">-- ms</strong></div>
+            <div class="pmetric"><span>Person</span><strong id="mPresence">Idle</strong></div>
+            <div class="pmetric"><span>Posture</span><strong id="mPosture">--</strong></div>
+            <div class="pmetric"><span>State</span><strong id="mState" class="state-txt">STABLE</strong></div>
+            <div class="pmetric pmetric-action">
+              <button class="btn-sm btn-primary-sm" onclick="startWebcam()">${icon('camera', 14)} Start</button>
+              <button class="btn-sm btn-outline-sm" onclick="stopWebcam()">Stop</button>
+            </div>
+          </div>
+        </div>
 
-              <div class="video-wrapper">
-                <video id="videoFeed" class="video-stream" autoplay playsinline muted></video>
-                <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
-                <div class="stream-badge"><div class="dot"></div> Camera 01 · Live Edge Feed</div>
-              </div>
+        <!-- MAIN DASHBOARD GRID: video left, outputs right -->
+        <div class="pipe-grid">
 
-              <div id="pipelineAlertBanner" class="alert-banner">
-                ${icon('alert', 22)}
-                <div>
-                  <strong style="color: #8e4837; font-size: 15px;">CRITICAL EMERGENCY: Verified Fall Event!</strong>
-                  <p style="margin: 3px 0 0; font-size: 12px; color: #8e4837;">Temporal state machine confirmed sudden vertical drop and persistent floor dwell. Central VLM verified unrecovered posture.</p>
-                </div>
+          <!-- LEFT: Camera Feed -->
+          <div class="pipe-video-col">
+            <div class="video-wrapper" style="aspect-ratio: 4/3;">
+              <video id="videoFeed" class="video-stream" autoplay playsinline muted></video>
+              <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
+              <div class="stream-badge"><div class="dot"></div> Camera 01 · Edge Inference</div>
+            </div>
+            <div id="pipelineAlertBanner" class="alert-banner" style="margin-top: 8px;">
+              ${icon('alert', 18)}
+              <div>
+                <strong style="color: #8e4837; font-size: 13px;">CRITICAL EMERGENCY: Verified Fall!</strong>
+                <p style="margin: 2px 0 0; font-size: 11px; color: #8e4837;">Temporal state machine confirmed drop + floor dwell. VLM verified unrecovered posture.</p>
               </div>
-            </section>
-
-            <!-- CENTRAL AI SERVER CARD: VLM + CHROMADB AGENTIC REASONING -->
-            <section class="surface" style="border-left: 4px solid var(--clay);">
-              <div class="surface-header" style="margin-bottom: 12px;">
-                <div>
-                  <h2 style="font-size: 17px; display: flex; align-items: center; gap: 8px;">
-                    ${icon('brain', 19)} Central AI Server · VLM & ChromaDB Agent
-                  </h2>
-                  <p>Vision-Language Model verification synthesized with empirical vector memory</p>
-                </div>
-                <span id="cDecisionBadge" class="badge stable">NORMAL / LOG</span>
-              </div>
-
-              <div class="stat-item">
-                <span>VLM Scene Verification (Qwen2.5-VL)</span>
-                <span id="cVlmConf" class="badge stable" style="font-size: 11px;">94% Match</span>
-              </div>
-              <p id="cVlmObs" style="margin: 6px 0 12px; font-size: 13px; color: var(--ink-soft); line-height: 1.45; background: #faf9f6; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);">
-                Visual confirmation: Camera 01 subject is upright and stable. Zero fall signal observed.
-              </p>
-
-              <div class="stat-item">
-                <span>ChromaDB Historical Memory Match</span>
-                <span id="cMemoryScore" style="font-size: 11px; color: var(--muted); font-weight: 700;">Similarity: 92.4%</span>
-              </div>
-              <p id="cMemoryDoc" style="margin: 6px 0 12px; font-size: 12px; color: var(--muted); line-height: 1.4; background: #fdfaf4; padding: 10px 12px; border-radius: 8px; border: 1px solid #e8dec8;">
-                Camera 01 Baseline: Stable upright and seated postures indexed. Prior empirical fall profile at t=79.0s (92.1 px/s drop, 13.1s dwell).
-              </p>
-
-              <div class="stat-item">
-                <span>Agentic Decision & Action</span>
-                <strong id="cActionText" style="color: var(--clay); font-size: 13px;">Log event · Continuous monitoring active</strong>
-              </div>
-            </section>
+            </div>
           </div>
 
-          <!-- Right Column: Operational Stages Stack -->
-          <div style="display: flex; flex-direction: column; gap: 14px;">
-            
-            <!-- STAGE 1 CARD: PERSON PRESENCE & MOTION FLUX -->
-            <section class="stage-block">
-              <div class="stage-block-header">
-                <h3><span class="stage-num">1</span> Person Presence & Motion Gate</h3>
-                <span id="pPresenceBadge" class="badge">Scene Idle</span>
+          <!-- RIGHT: Compact Output Panels -->
+          <div class="pipe-outputs-col">
+
+            <!-- STAGE 1 -->
+            <div class="out-card">
+              <div class="out-card-hdr">
+                <span class="stage-num">1</span>
+                <span class="out-card-title">Person Presence & Motion Gate</span>
+                <span id="pPresenceBadge" class="chip chip-sage">Person Detected</span>
               </div>
-              <div class="stat-item">
-                <span>Presence Status</span>
-                <strong id="pPresenceText">SCENE IDLE</strong>
-              </div>
-              <div class="stat-item">
-                <span>Frame Motion Flux</span>
-                <strong id="pMotionFlux">0.0%</strong>
-              </div>
-              <div class="flux-container">
-                <div class="flux-track">
-                  <div id="pMotionFluxBar" class="flux-fill"></div>
+              <div class="out-rows">
+                <div class="out-row"><span>Presence</span><strong id="pPresenceText">SCENE IDLE</strong></div>
+                <div class="out-row"><span>Motion Flux</span>
+                  <div class="flux-inline">
+                    <div class="flux-track-sm"><div id="pMotionFluxBar" class="flux-fill"></div></div>
+                    <strong id="pMotionFlux">0.0%</strong>
+                  </div>
                 </div>
+                <div class="out-row"><span>Activity</span><strong id="pMotionActivity" style="color:var(--sage)">Stationary</strong></div>
               </div>
-              <div class="stat-item">
-                <span>Movement Activity</span>
-                <strong id="pMotionActivity" style="color: var(--sage);">Stationary Presence</strong>
-              </div>
-            </section>
+            </div>
 
-            <!-- STAGE 2 CARD: BIOMECHANICAL POSTURE RECOGNITION -->
-            <section class="stage-block">
-              <div class="stage-block-header">
-                <h3><span class="stage-num">2</span> Biomechanical Posture Estimation</h3>
-                <span id="pPostureBadge" class="badge stable">Standing</span>
+            <!-- STAGE 2 -->
+            <div class="out-card">
+              <div class="out-card-hdr">
+                <span class="stage-num">2</span>
+                <span class="out-card-title">Biomechanical Posture Estimation</span>
+                <span id="pPostureBadge" class="chip chip-sage">Standing</span>
               </div>
-              <div class="stat-item">
-                <span>Classified Posture</span>
-                <strong id="pPostureText">Standing</strong>
+              <div class="out-rows">
+                <div class="out-row"><span>Posture</span><strong id="pPostureText">Standing</strong></div>
+                <div class="out-row"><span>Torso Angle</span><strong id="pTorsoAngle">0.0°</strong></div>
+                <div class="out-row"><span>BBox Aspect</span><strong id="pAspectRatio">0.0</strong></div>
               </div>
-              <div class="stat-item">
-                <span>Torso Angle to Vertical</span>
-                <strong id="pTorsoAngle">0.0°</strong>
-              </div>
-              <div class="stat-item">
-                <span>Bounding Box Aspect Ratio</span>
-                <strong id="pAspectRatio">0.0</strong>
-              </div>
-              <div style="margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.35;" id="pPostureDetail">
-                Pose keypoints extracted via YOLO11n-Pose on RTX 3050 CUDA.
-              </div>
-            </section>
+            </div>
 
-            <!-- STAGE 3 CARD: TEMPORAL STATE MACHINE -->
-            <section class="stage-block">
-              <div class="stage-block-header">
-                <h3><span class="stage-num">3</span> Temporal Fall State Machine</h3>
-                <span id="pStateBadge" class="badge stable">STABLE</span>
+            <!-- STAGE 3 -->
+            <div class="out-card">
+              <div class="out-card-hdr">
+                <span class="stage-num">3</span>
+                <span class="out-card-title">Temporal Fall State Machine</span>
+                <span id="pStateBadge" class="chip chip-sage">STABLE</span>
               </div>
-              <div class="stat-item">
-                <span>Current State</span>
-                <strong id="pStateText" style="color: var(--clay);">Stable Posture</strong>
+              <div class="out-rows">
+                <div class="out-row"><span>Current State</span><strong id="pStateText" style="color:var(--clay)">Normal Monitoring (Stable)</strong></div>
+                <div class="out-row"><span>Drop Velocity</span><strong id="pDropVelocity">0.0 px/s</strong></div>
+                <div class="out-row"><span>Floor Dwell</span><strong id="pGroundDwell">0.0 s</strong></div>
               </div>
-              <div class="stat-item">
-                <span>Vertical Drop Velocity</span>
-                <strong id="pDropVelocity">0.0 px/s</strong>
-              </div>
-              <div class="stat-item">
-                <span>Floor Dwell Duration</span>
-                <strong id="pGroundDwell">0.0 s</strong>
-              </div>
-              <div style="margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.35;">
-                Transitions: STABLE → RAPID_DROP (>90 px/s) → VERIFYING (1.5s dwell) → FALL_CONFIRMED.
-              </div>
-            </section>
+            </div>
 
-            <!-- LIVE ALERTS MINI-FEED -->
-            <section class="stage-block">
-              <div class="stage-block-header">
-                <h3><span class="stage-num">4</span> Verified Incident Alerts</h3>
-                <span id="alertCountBadge" class="badge">${liveAlerts.length} Events</span>
+            <!-- STAGE 4: VLM + ChromaDB -->
+            <div class="out-card out-card-central">
+              <div class="out-card-hdr">
+                <span class="stage-num stage-num-clay">VLM</span>
+                <span class="out-card-title">${icon('brain', 14)} Qwen2.5-VL · ChromaDB Agent</span>
+                <span id="cDecisionBadge" class="chip chip-muted">NORMAL / LOG</span>
               </div>
-              <div id="pipelineAlertFeed" style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
-                ${renderAlertCards()}
+              <div class="out-rows">
+                <div class="out-row"><span>VLM Confidence</span><strong id="cVlmConf" class="chip chip-sage" style="font-size:11px;">94%</strong></div>
+                <div class="out-row"><span>Scene Observation</span></div>
+                <div id="cVlmObs" class="out-text-box">Indeterminate visual orientation. Monitoring dwell duration.</div>
+                <div class="out-row" style="margin-top:4px;"><span>Memory Match</span><strong id="cMemoryScore" style="font-size:11px;color:var(--muted)">92.4%</strong></div>
+                <div id="cMemoryDoc" class="out-text-box out-text-memory">Camera 01 Baseline: Stable upright and seated postures indexed.</div>
+                <div class="out-row" style="margin-top:4px;"><span>Agentic Action</span><strong id="cActionText" style="color:var(--clay);font-size:12px;">Log · Monitoring active</strong></div>
               </div>
-            </section>
+            </div>
 
           </div>
         </div>
@@ -317,7 +246,7 @@ function pipelineView() {
   bindEvents();
 }
 
-// ----------------- CHROMADB MEMORY EXPLORER VIEW -----------------
+// ===================== CHROMADB MEMORY VIEW ===================
 async function memoryView() {
   activeView = 'memory';
   if (window.edgeVision) window.edgeVision.stopCamera();
@@ -415,7 +344,7 @@ async function searchChromaMemory() {
   }
 }
 
-// ----------------- MEASURED BENCHMARK VIEW -----------------
+// =================== MEASURED BENCHMARK VIEW =================
 function benchmarkView() {
   activeView = 'benchmark';
   if (window.edgeVision) window.edgeVision.stopCamera();
@@ -436,41 +365,17 @@ function benchmarkView() {
           </div>
 
           <div class="bench-grid">
-            <div class="bench-card">
-              <span>Event Precision</span>
-              <strong style="color: var(--sage);">${measuredBenchmark.precision}</strong>
-            </div>
-            <div class="bench-card">
-              <span>Event Recall</span>
-              <strong style="color: var(--sage);">${measuredBenchmark.recall}</strong>
-            </div>
-            <div class="bench-card">
-              <span>False Alarms (Sitting / Lean)</span>
-              <strong style="color: var(--sage);">${measuredBenchmark.falsePositivesSitting}</strong>
-            </div>
-            <div class="bench-card">
-              <span>F1-Score</span>
-              <strong style="color: var(--sage);">${measuredBenchmark.f1}</strong>
-            </div>
+            <div class="bench-card"><span>Event Precision</span><strong style="color: var(--sage);">${measuredBenchmark.precision}</strong></div>
+            <div class="bench-card"><span>Event Recall</span><strong style="color: var(--sage);">${measuredBenchmark.recall}</strong></div>
+            <div class="bench-card"><span>False Alarms (Sitting / Lean)</span><strong style="color: var(--sage);">${measuredBenchmark.falsePositivesSitting}</strong></div>
+            <div class="bench-card"><span>F1-Score</span><strong style="color: var(--sage);">${measuredBenchmark.f1}</strong></div>
           </div>
 
           <div class="bench-grid" style="margin-top: 14px;">
-            <div class="bench-card">
-              <span>Evaluated Frames</span>
-              <strong>${measuredBenchmark.frames.toLocaleString()}</strong>
-            </div>
-            <div class="bench-card">
-              <span>Clip Duration</span>
-              <strong>${measuredBenchmark.duration}</strong>
-            </div>
-            <div class="bench-card">
-              <span>Avg Pipeline Latency</span>
-              <strong style="color: var(--clay);">${measuredBenchmark.latency}</strong>
-            </div>
-            <div class="bench-card">
-              <span>Throughput</span>
-              <strong style="color: var(--clay);">${measuredBenchmark.throughput}</strong>
-            </div>
+            <div class="bench-card"><span>Evaluated Frames</span><strong>${measuredBenchmark.frames.toLocaleString()}</strong></div>
+            <div class="bench-card"><span>Clip Duration</span><strong>${measuredBenchmark.duration}</strong></div>
+            <div class="bench-card"><span>Avg Pipeline Latency</span><strong style="color: var(--clay);">${measuredBenchmark.latency}</strong></div>
+            <div class="bench-card"><span>Throughput</span><strong style="color: var(--clay);">${measuredBenchmark.throughput}</strong></div>
           </div>
 
           <div style="margin-top: 24px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: white;">
@@ -489,7 +394,7 @@ function benchmarkView() {
   bindEvents();
 }
 
-// ----------------- RENDER ALERT CARDS -----------------
+// ================ RENDER ALERT CARDS =================
 function renderAlertCards() {
   if (liveAlerts.length === 0) {
     return `
@@ -517,7 +422,7 @@ function renderAlertCards() {
         <span>${a.posture_trajectory}</span>
       </div>
       <div class="alert-card-action">
-        ${a.acknowledged ? 
+        ${a.acknowledged ?
           `<span style="color: var(--sage); font-size: 11px; font-weight: 700;">✓ Acknowledged</span>` :
           `<button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="acknowledgeAlert('${a.alert_id}')">Acknowledge</button>`
         }
@@ -553,7 +458,7 @@ async function acknowledgeAlert(alertId) {
   }
 }
 
-// ----------------- DEDICATED ALERTS VIEW -----------------
+// ================== DEDICATED ALERTS VIEW ==================
 function alertsView() {
   activeView = 'alerts';
 
