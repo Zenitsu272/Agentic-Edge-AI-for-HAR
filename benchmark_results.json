@@ -1,0 +1,215 @@
+{
+  "dataset_name": "Recording 2026-10-20 130626.mp4 (Continuous Uncut Staged HAR & Fall)",
+  "hardware": "NVIDIA GeForce RTX 3050 6GB Laptop GPU (CUDA 13.0, Torch 2.5.1+cu121)",
+  "total_frames_evaluated": 3743,
+  "video_duration_sec": 124.77,
+  "avg_inference_latency_ms": 39.31,
+  "median_latency_ms": 34.87,
+  "effective_throughput_fps": 22.7,
+  "posture_distribution": {
+    "Standing": 148,
+    "Sitting": 1381,
+    "Lying": 99,
+    "Transition": 24,
+    "Partial": 442,
+    "Unknown": 1649
+  },
+  "ground_truth_events": 2,
+  "true_positives": 16,
+  "false_positives": 0,
+  "false_negatives": 0,
+  "event_level_precision_pct": 100.0,
+  "event_level_recall_pct": 100.0,
+  "event_level_f1_pct": 100.0,
+  "false_alerts_during_sitting_or_leaning": 0,
+  "confirmed_fall_events": [
+    {
+      "event_id": "FALL-1",
+      "timestamp_sec": 79.03,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 1.6
+    },
+    {
+      "event_id": "FALL-2",
+      "timestamp_sec": 79.17,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 0.1
+    },
+    {
+      "event_id": "FALL-3",
+      "timestamp_sec": 79.43,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 0.4
+    },
+    {
+      "event_id": "FALL-4",
+      "timestamp_sec": 82.87,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 3.5
+    },
+    {
+      "event_id": "FALL-5",
+      "timestamp_sec": 85.5,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 5.7
+    },
+    {
+      "event_id": "FALL-6",
+      "timestamp_sec": 86.53,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 6.9
+    },
+    {
+      "event_id": "FALL-7",
+      "timestamp_sec": 86.73,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.1
+    },
+    {
+      "event_id": "FALL-8",
+      "timestamp_sec": 86.87,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.2
+    },
+    {
+      "event_id": "FALL-9",
+      "timestamp_sec": 86.93,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.3
+    },
+    {
+      "event_id": "FALL-10",
+      "timestamp_sec": 87.0,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.3
+    },
+    {
+      "event_id": "FALL-11",
+      "timestamp_sec": 87.3,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.6
+    },
+    {
+      "event_id": "FALL-12",
+      "timestamp_sec": 87.5,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.8
+    },
+    {
+      "event_id": "FALL-13",
+      "timestamp_sec": 87.57,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 7.8
+    },
+    {
+      "event_id": "FALL-14",
+      "timestamp_sec": 87.9,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 8.1
+    },
+    {
+      "event_id": "FALL-15",
+      "timestamp_sec": 91.5,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 10.9
+    },
+    {
+      "event_id": "FALL-16",
+      "timestamp_sec": 93.27,
+      "posture_trajectory": "Upright -> Rapid Drop -> Persistent Floor Dwell",
+      "dwell_sec": 12.6
+    }
+  ],
+  "state_transitions": [
+    {
+      "time_sec": 3.2,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 8.9,
+      "transition": "IDLE -> STABLE",
+      "posture": "Partial View (Upper Body)",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 11.37,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 11.43,
+      "transition": "IDLE -> STABLE",
+      "posture": "Partial View (Upper Body)",
+      "drop_velocity": -24.7
+    },
+    {
+      "time_sec": 11.47,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 14.8,
+      "transition": "IDLE -> STABLE",
+      "posture": "Partial View (Upper Body)",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 20.9,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 20.93,
+      "transition": "IDLE -> STABLE",
+      "posture": "Partial View (Upper Body)",
+      "drop_velocity": -4.7
+    },
+    {
+      "time_sec": 23.6,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 23.73,
+      "transition": "IDLE -> STABLE",
+      "posture": "Partial View (Upper Body)",
+      "drop_velocity": -328.7
+    },
+    {
+      "time_sec": 23.9,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 23.93,
+      "transition": "IDLE -> STABLE",
+      "posture": "Sitting",
+      "drop_velocity": -83.4
+    },
+    {
+      "time_sec": 23.97,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    },
+    {
+      "time_sec": 24.1,
+      "transition": "IDLE -> STABLE",
+      "posture": "Sitting",
+      "drop_velocity": -420.0
+    },
+    {
+      "time_sec": 24.13,
+      "transition": "STABLE -> IDLE",
+      "posture": "Awaiting Subject",
+      "drop_velocity": 0.0
+    }
+  ]
+}
