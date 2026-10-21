@@ -27,6 +27,8 @@ ENV/
 
 # Model checkpoints & cache (large binaries)
 *.pt
+!yolov8n.pt
+!yolo11n-pose.pt
 *.bin
 *.safetensors
 *.gguf
