@@ -73,9 +73,7 @@ def get_system_health():
     remote_notify_health = "NOT_CONFIGURED"
 
     # Derive overall aggregate health
-    if vlm_health == "UNAVAILABLE":
-        aggregate_status = "DEGRADED"
-    elif vlm_health == "DEGRADED" or remote_notify_health == "NOT_CONFIGURED":
+    if vlm_health in ["UNAVAILABLE", "DEGRADED"]:
         aggregate_status = "DEGRADED"
     else:
         aggregate_status = "ONLINE"

@@ -88,8 +88,8 @@ class VLMAdapter:
         # Frames can be passed directly or inside candidate_event
         frames = evidence_frames or candidate_event.get("evidence_frames") or candidate_event.get("frames") or []
 
-        # If online model is loaded, evaluate frames with genuine inference
-        if self.status == "ONLINE" and self.model is not None and self.processor is not None:
+        # If online model is loaded and evidence frames are present, evaluate frames with genuine inference
+        if self.status == "ONLINE" and self.model is not None and self.processor is not None and len(frames) > 0:
             try:
                 return self._run_model_inference(candidate_event, frames)
             except Exception as e:
@@ -99,7 +99,7 @@ class VLMAdapter:
                     error_detail=f"VLM inference exception: {str(e)[:140]}"
                 )
 
-        # Explicit rule-based fallback when model is not ONLINE
+        # Explicit rule-based fallback when model is not ONLINE or no video frames are available
         return self._build_fallback_response(candidate_event)
 
     def _build_fallback_response(self, candidate_event: Dict[str, Any], error_detail: Optional[str] = None) -> Dict[str, Any]:
