@@ -10,46 +10,48 @@ CareWatch is an enterprise-grade Edge-First Human Activity Recognition (HAR) and
 ```mermaid
 flowchart TD
     subgraph VideoSource["1. Video Source & Ingestion"]
-        CAM["Live Edge Camera (getUserMedia)"]
-        REPLAY["Reproducible Video Replay Simulation"]
+        CAM["Live Edge Camera (Webcam / getUserMedia)"]
+        REPLAY["Video Replay Simulation (.mp4 / .avi)"]
     end
 
-    subgraph EdgeInference["2. Real-Time Edge Pipeline (inference.py)"]
+    subgraph EdgeInference["2. Real-Time Edge Pipeline on CPU (inference.py)"]
         FDIFF["Grayscale Frame Differencing\n(Pixel Motion Flux %)"]
-        DET["YOLOv8n Person Detector\n(CUDA:0, Conf: 0.35)"]
+        DET["YOLOv8n Person Detector\n(CPU, Conf: 0.20)"]
         TRACK["Centroid Tracker (tracker.py)\n(Track ID, Displacement px/s)"]
-        POSE["YOLO11n-Pose Estimator\n(17 COCO Keypoints, CUDA:0)"]
-        BIO["Biomechanical Posture Classifier\n(Standing / Sitting / Lying / Bending)"]
+        POSE["YOLO11n-Pose Estimator\n(17 COCO Keypoints, CPU)"]
+        BIO["Biomechanical Posture Classifier\n(Torso Angle, Aspect Ratio, Joint Heights)"]
         FSM["Temporal Fall State Machine\n(STABLE → RAPID_DROP → VERIFYING → FALL_CONFIRMED)"]
-        BUF["Bounded Frame Ring Buffer (deque 45)"]
+        BUF["Rolling Frame Ring Buffer (deque maxlen=45)"]
     end
 
-    subgraph CentralAgent["3. Agentic Verification & Escalation (agent.py)"]
-        REACT["CareWatch Bounded ReAct Agent\n(Max 4 Steps, Timeout-guarded)"]
-        T1["Tool 1: Inspect Candidate Kinematics"]
-        T2["Tool 2: ChromaDB Semantic Memory Query"]
-        T3["Tool 3: VLM Verification Adapter"]
-        T4["Tool 4: Deterministic Policy Evaluation"]
+    subgraph LangGraphOrchestrator["3. LangGraph Multi-Agent Orchestration (agent_graph.py)"]
+        LG_COORD["IncidentCoordinator\n(Queue Depth, Concurrency Guard, Debounce)"]
+        LG_STATE["StateGraph Execution Node\n(Bounded 15s Deadline Enforcement)"]
+        T_INSPECT["Node 1: Inspect Kinematics & Posture"]
+        T_MEMORY["Node 2: Retrieve ChromaDB Memory Context"]
+        T_VLM["Node 3: GPU Multimodal VLM Verification"]
+        T_POLICY["Node 4: Deterministic Policy Evaluation"]
+        T_PERSIST["Node 5: Audit Persistence & Dissemination"]
     end
 
-    subgraph VerificationEngine["4. Multimodal Verification & Policy (vlm_adapter.py & policy.py)"]
-        VLM["VLM Adapter (Qwen2.5-VL-3B / Fallback)\n(Transparent Status & Structured Observations)"]
-        POL["Deterministic Escalation Policy\n(EMERGENCY / WARNING / NORMAL / UNCERTAIN)"]
+    subgraph GPUVLM["4. 4-Bit Multimodal VLM on GPU (vlm_adapter.py)"]
+        QWEN["Qwen2.5-VL-3B-Instruct\n(BitsAndBytes 4-bit NF4 on CUDA:0, 2.35 GB VRAM)\nInput: 4 Evidentiary Frames + Visual Prompt\nOutput: Structured JSON Observation"]
+        FALLBACK["Rule-Based Biomechanical Fallback\n(Transparent provenance if frames absent)"]
     end
 
     subgraph PersistenceLayer["5. Dual Persistent Storage (database.py & ChromaDB)"]
-        SQLITE[("SQLite3 Database (carewatch.db)\n- events table\n- agent_traces table")]
-        CHROMA[("ChromaDB Persistent Collection\ncarewatch_agent_memory")]
+        SQLITE[("SQLite3 Database (carewatch.db)\n- events table (alerts)\n- agent_traces table (audit logs)")]
+        CHROMA[("ChromaDB Persistent Vector Store\n(carewatch_agent_memory)")]
     end
 
-    subgraph FrontendMonitoring["6. Live Platform Dashboard (dist/)"]
-        PIPE_VIEW["Live Pipeline View\n(Single-Viewport, Overlaid Skeleton)"]
-        CHROMA_VIEW["ChromaDB Memory Search View"]
-        BENCH_VIEW["Measured Benchmark View\n(Empirical F1, Precision, Latencies)"]
-        ALERT_VIEW["Safety Decisions & Audit Log Feed\n(Persistent Acknowledgements)"]
+    subgraph FrontendMonitoring["6. Single-Viewport Edge Dashboard (dist/)"]
+        PIPE_VIEW["Live Pipeline View\n(Real-Time Skeleton Overlay, FPS, Flux)"]
+        ALERT_VIEW["Incident Alerts & Audit Feed\n(Persistent Acknowledgements)"]
+        CHROMA_VIEW["ChromaDB Memory Search View\n(Incident Similarity Browser)"]
+        BENCH_VIEW["Measured Benchmark View\n(Empirical F1, Precision, Latency)"]
     end
 
-    %% Connections
+    %% Edge Ingestion
     CAM --> BUF
     REPLAY --> BUF
     BUF --> FDIFF
@@ -60,21 +62,22 @@ flowchart TD
     TRACK --> FSM
     BIO --> FSM
 
-    FSM -- "Candidate Event Trigger" --> REACT
-    REACT --> T1
-    REACT --> T2
-    REACT --> T3
-    REACT --> T4
+    %% Trigger LangGraph
+    FSM -- "Candidate Event (Drop Velocity + Dwell)" --> LG_COORD
+    LG_COORD --> LG_STATE
+    LG_STATE --> T_INSPECT
+    T_INSPECT --> T_MEMORY
+    T_MEMORY <--> CHROMA
+    T_MEMORY --> T_VLM
+    T_VLM <--> QWEN
+    QWEN -.->|Failover| FALLBACK
+    T_VLM --> T_POLICY
+    T_POLICY --> T_PERSIST
+    T_PERSIST --> SQLITE
+    T_PERSIST --> CHROMA
 
-    T2 <--> CHROMA
-    T3 <--> VLM
-    T4 <--> POL
-
-    POL -- "Store Verified Event" --> SQLITE
-    POL -- "Index Verified Profile" --> CHROMA
-    REACT -- "Audit Trace Record" --> SQLITE
-
-    EdgeInference -- "WebSocket /ws/pipeline" --> PIPE_VIEW
+    %% Telemetry & Dashboard
+    EdgeInference -- "WebSocket /ws/pipeline (30 FPS)" --> PIPE_VIEW
     SQLITE -- "REST /api/alerts" --> ALERT_VIEW
     CHROMA -- "REST /api/chroma_memories" --> CHROMA_VIEW
     SQLITE -- "REST /api/benchmark" --> BENCH_VIEW
