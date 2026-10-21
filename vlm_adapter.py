@@ -208,29 +208,34 @@ class VLMAdapter:
         camera_id = candidate_event.get("camera_id", "Camera 01")
         pil_images = self._prepare_pil_images(frames)
 
-        # Construct neutral, evidence-focused prompt without confirmation bias
+        # Construct expert clinical temporal sequence prompt
         prompt_text = (
-            "You are an objective vision verification system in a healthcare monitoring environment.\n"
-            "Examine the provided camera frame(s) carefully. Describe observable human posture, body orientation, "
-            "contact with floor or furniture, and evidence of voluntary recovery or distress.\n"
-            "Do NOT assume or confirm a fall occurred unless unequivocal visual evidence demonstrates an uncontrolled "
-            "collapse onto the floor without recovery.\n"
+            "You are an expert clinical vision AI monitoring healthcare and resident safety.\n"
+            "You are provided with chronologically ordered video frames (Frame 1 to Frame N) capturing a continuous temporal action.\n"
+            "Carefully analyze the dynamic physical action and arm/hand support mechanics across the sequence:\n"
+            "1. In the initial frame(s), what is the resident's posture (standing, sitting, walking)?\n"
+            "2. Across the sequence, does the resident suddenly lose balance, trip, slip, or collapse backward/forward/sideways onto the floor, bed, or furniture?\n"
+            "3. Look closely at their arms and hands: Do they actively brace their descent with elbows/hands (voluntary controlled recline), or do they fall/collapse backward without arm support (involuntary fall / syncopal collapse onto bed)?\n"
+            "4. In the final frame(s), are they horizontal, slumped, or motionless with limbs dangling without voluntary recovery?\n"
+            "Rule: An uncontrolled collapse or backward/forward fall onto a bed, furniture, or floor without arm support is a fall incident (is_true_fall: true).\n"
             "Respond strictly in valid JSON matching this schema:\n"
             "{\n"
-            '  "action_observed": "string describing observed physical activity",\n'
-            '  "posture": "standing | sitting | lying_floor | transitioning | recovering | other",\n'
+            '  "action_observed": "step-by-step description of what happened across the sequence",\n'
+            '  "fall_type": "none | floor_collapse | bed_collapse | furniture_slump | slip_trip",\n'
+            '  "posture": "standing | sitting | lying_floor | collapsed_bed | transitioning | other",\n'
             '  "floor_contact": boolean,\n'
             '  "voluntary_recovery": boolean,\n'
             '  "is_true_fall": boolean,\n'
             '  "confidence": float between 0.0 and 1.0,\n'
             '  "uncertainty": boolean,\n'
-            '  "scene_observation": "concise objective summary of physical evidence"\n'
+            '  "scene_observation": "concise clinical summary of the fall event or normal activity"\n'
             "}"
         )
 
         content_payload = []
         if pil_images:
-            for pil_img in pil_images[:4]: # Cap at 4 frames to keep bounded
+            for i, pil_img in enumerate(pil_images[:4]): # Cap at 4 frames to keep bounded
+                content_payload.append({"type": "text", "text": f"Frame {i+1} (Temporal T{i+1}):"})
                 content_payload.append({"type": "image", "image": pil_img})
         content_payload.append({"type": "text", "text": prompt_text})
 
