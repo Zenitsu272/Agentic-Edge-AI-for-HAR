@@ -20,12 +20,20 @@ class EdgeVisionClient {
     this.isStreaming = false;
     this.waitingForResponse = false;
     this.lastFrameTime = 0;
+    this.smoothedKpts = null;
+    this.sentFrameWidth = 480;
+    this.sentFrameHeight = 360;
     
-    // COCO Keypoint pairs for skeleton rendering
+    // 17-Keypoint COCO pairs for full-body & facial landmark tracking
     this.SKELETON_PAIRS = [
-      [5, 6], [5, 7], [7, 9], [6, 8], [8, 10], // arms
-      [5, 11], [6, 12], [11, 12], // torso
-      [11, 13], [13, 15], [12, 14], [14, 16] // legs
+      // Facial & Head landmarks (Nose, Eyes, Ears)
+      [0, 1], [0, 2], [1, 3], [2, 4],
+      // Torso & Shoulders
+      [5, 6], [5, 11], [6, 12], [11, 12],
+      // Arms (Shoulder -> Elbow -> Wrist)
+      [5, 7], [7, 9], [6, 8], [8, 10],
+      // Legs (Hip -> Knee -> Ankle)
+      [11, 13], [13, 15], [12, 14], [14, 16]
     ];
   }
 
@@ -57,6 +65,7 @@ class EdgeVisionClient {
     this.overlayCanvas = document.getElementById(overlayCanvasId);
     if (this.overlayCanvas) {
       this.overlayCtx = this.overlayCanvas.getContext('2d');
+      this.overlayCanvas.classList.remove('no-mirror');
     }
 
     if (!this.stream) {
@@ -138,6 +147,7 @@ class EdgeVisionClient {
     this.overlayCanvas = document.getElementById(overlayCanvasId);
     if (this.overlayCanvas) {
       this.overlayCtx = this.overlayCanvas.getContext('2d');
+      this.overlayCanvas.classList.add('no-mirror');
     }
 
     if (this.stream) {
@@ -221,18 +231,41 @@ class EdgeVisionClient {
 
             const s2 = data.stage2_posture;
             if (s2 && s2.keypoints && s2.keypoints.length > 0) {
-              this.overlayCtx.lineWidth = 2.5;
-              this.overlayCtx.strokeStyle = s2.category === 'Lying' ? '#c85a32' : '#5f806b';
+              const kpts = s2.keypoints;
+              const theme = s2.category === 'Lying' ? '#b5179e' : '#00f5d4';
+              this.overlayCtx.lineCap = 'round';
+              this.overlayCtx.lineJoin = 'round';
+
               for (const [p1, p2] of this.SKELETON_PAIRS) {
-                const pt1 = s2.keypoints[p1];
-                const pt2 = s2.keypoints[p2];
-                if (pt1 && pt2 && pt1[2] > 0.25 && pt2[2] > 0.25) {
+                const pt1 = kpts[p1];
+                const pt2 = kpts[p2];
+                if (pt1 && pt2 && pt1[2] > 0.20 && pt2[2] > 0.20) {
+                  const isHead = (p1 < 5 || p2 < 5);
+                  this.overlayCtx.lineWidth = isHead ? 2.2 : 3.5;
+                  this.overlayCtx.strokeStyle = isHead ? '#ffd166' : theme;
                   this.overlayCtx.beginPath();
                   this.overlayCtx.moveTo(pt1[0] * sx, pt1[1] * sy);
                   this.overlayCtx.lineTo(pt2[0] * sx, pt2[1] * sy);
                   this.overlayCtx.stroke();
                 }
               }
+
+              kpts.forEach((pt, idx) => {
+                if (pt[2] > 0.20) {
+                  const jx = pt[0] * sx;
+                  const jy = pt[1] * sy;
+                  const isHead = idx < 5;
+                  const radius = isHead ? 3.5 : 4.8;
+                  this.overlayCtx.beginPath();
+                  this.overlayCtx.arc(jx, jy, radius, 0, 2 * Math.PI);
+                  this.overlayCtx.fillStyle = isHead ? '#ffd166' : theme;
+                  this.overlayCtx.fill();
+                  this.overlayCtx.beginPath();
+                  this.overlayCtx.arc(jx, jy, radius * 0.45, 0, 2 * Math.PI);
+                  this.overlayCtx.fillStyle = '#ffffff';
+                  this.overlayCtx.fill();
+                }
+              });
             }
           }
         }
@@ -358,18 +391,25 @@ class EdgeVisionClient {
   sendCurrentFrame() {
     if (!this.isStreaming || this.waitingForResponse) return;
     if (!this.videoEl || this.videoEl.readyState < 2) {
-      setTimeout(() => this.sendCurrentFrame(), 80);
+      setTimeout(() => this.sendCurrentFrame(), 50);
       return;
     }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    this.canvas.width = 480;
-    this.canvas.height = 360;
-    this.ctx.drawImage(this.videoEl, 0, 0, this.canvas.width, this.canvas.height);
-    const b64 = this.canvas.toDataURL('image/jpeg', 0.65);
+    const vw = this.videoEl.videoWidth || 640;
+    const vh = this.videoEl.videoHeight || 480;
+    const targetW = 480;
+    const targetH = Math.max(240, Math.round(targetW * (vh / vw)));
 
+    this.canvas.width = targetW;
+    this.canvas.height = targetH;
+    this.ctx.drawImage(this.videoEl, 0, 0, targetW, targetH);
+    const b64 = this.canvas.toDataURL('image/jpeg', 0.60);
+
+    this.sentFrameWidth = targetW;
+    this.sentFrameHeight = targetH;
     this.waitingForResponse = true;
     this.lastFrameTime = performance.now();
     this.ws.send(b64);
@@ -516,21 +556,23 @@ class EdgeVisionClient {
       window.recordAlertEvent(s3.active_alert);
     }
 
-    // 6. Canvas Overlays (Bounding Box + Skeleton)
+    // 6. Canvas Overlays (Bounding Box + Skeleton with Smoothing & True Aspect Ratio)
     if (this.overlayCanvas && this.videoEl && this.videoEl.videoWidth > 0) {
       this.overlayCanvas.width = this.videoEl.videoWidth;
       this.overlayCanvas.height = this.videoEl.videoHeight;
       this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
 
-      const sx = this.overlayCanvas.width / 480.0;
-      const sy = this.overlayCanvas.height / 360.0;
+      const sentW = this.sentFrameWidth || 480.0;
+      const sentH = this.sentFrameHeight || (sentW * (this.videoEl.videoHeight / this.videoEl.videoWidth));
+      const sx = this.overlayCanvas.width / sentW;
+      const sy = this.overlayCanvas.height / sentH;
 
-      // Color selection based on posture & event state
-      let themeColor = '#5f806b'; // Emerald
-      if (s2.category === 'Sitting') themeColor = '#3a86ff'; // Blue
-      if (s2.category === 'Lying') themeColor = '#7b2cbf'; // Purple
-      if (s3.state === 'RAPID_DROP' || s3.state === 'VERIFYING') themeColor = '#fb8500'; // Amber
-      if (s3.state === 'FALL_CONFIRMED') themeColor = '#e63946'; // Red Alert
+      // Color palette based on posture & risk state
+      let themeColor = '#00f5d4'; // Vivid Emerald Cyan
+      if (s2.category === 'Sitting') themeColor = '#4cc9f0'; // Clean Blue
+      if (s2.category === 'Lying') themeColor = '#b5179e'; // Vivid Purple
+      if (s3.state === 'RAPID_DROP' || s3.state === 'VERIFYING') themeColor = '#ff9f1c'; // Amber Warning
+      if (s3.state === 'FALL_CONFIRMED') themeColor = '#e71d36'; // Red Alert
 
       // A. Draw Presence Bounding Box
       s1.boxes.forEach(b => {
@@ -539,22 +581,41 @@ class EdgeVisionClient {
         const bw = (b.x2 - b.x1) * sx;
         const bh = (b.y2 - b.y1) * sy;
 
-        this.overlayCtx.lineWidth = 2.5;
+        this.overlayCtx.lineWidth = 2.0;
         this.overlayCtx.strokeStyle = themeColor;
-        this.overlayCtx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        this.overlayCtx.fillStyle = 'rgba(0, 245, 212, 0.04)';
         this.overlayCtx.strokeRect(bx, by, bw, bh);
         this.overlayCtx.fillRect(bx, by, bw, bh);
       });
 
-      // B. Draw 17-Keypoint Skeleton
-      const kpts = s2.keypoints;
-      if (kpts && kpts.length >= 17) {
-        this.overlayCtx.lineWidth = 3.5;
-        this.overlayCtx.strokeStyle = themeColor;
+      // B. Smooth Keypoint Interpolation (EMA)
+      const rawKpts = s2.keypoints;
+      if (rawKpts && rawKpts.length >= 17) {
+        if (!this.smoothedKpts || this.smoothedKpts.length !== rawKpts.length) {
+          this.smoothedKpts = rawKpts.map(p => [p[0], p[1], p[2]]);
+        } else {
+          const alpha = 0.65; // Highly responsive smoothing
+          for (let i = 0; i < rawKpts.length; i++) {
+            if (rawKpts[i][2] > 0.15) {
+              this.smoothedKpts[i][0] = alpha * rawKpts[i][0] + (1 - alpha) * this.smoothedKpts[i][0];
+              this.smoothedKpts[i][1] = alpha * rawKpts[i][1] + (1 - alpha) * this.smoothedKpts[i][1];
+              this.smoothedKpts[i][2] = rawKpts[i][2];
+            } else {
+              this.smoothedKpts[i][2] *= 0.85;
+            }
+          }
+        }
 
-        // Links
+        const kpts = this.smoothedKpts;
+        this.overlayCtx.lineCap = 'round';
+        this.overlayCtx.lineJoin = 'round';
+
+        // Draw Bones (Skeleton pairs)
         this.SKELETON_PAIRS.forEach(([i, j]) => {
-          if (kpts[i][2] > 0.25 && kpts[j][2] > 0.25) {
+          if (kpts[i][2] > 0.20 && kpts[j][2] > 0.20) {
+            const isHead = (i < 5 || j < 5);
+            this.overlayCtx.lineWidth = isHead ? 2.2 : 3.5;
+            this.overlayCtx.strokeStyle = isHead ? '#ffd166' : themeColor;
             this.overlayCtx.beginPath();
             this.overlayCtx.moveTo(kpts[i][0] * sx, kpts[i][1] * sy);
             this.overlayCtx.lineTo(kpts[j][0] * sx, kpts[j][1] * sy);
@@ -562,15 +623,25 @@ class EdgeVisionClient {
           }
         });
 
-        // Joints
-        kpts.forEach(pt => {
-          if (pt[2] > 0.25) {
+        // Draw Joints (Dual-ring glowing dots)
+        kpts.forEach((pt, idx) => {
+          if (pt[2] > 0.20) {
+            const jx = pt[0] * sx;
+            const jy = pt[1] * sy;
+            const isHead = (idx < 5);
+            const radius = isHead ? 3.5 : 4.8;
+
+            // Outer ring
             this.overlayCtx.beginPath();
-            this.overlayCtx.arc(pt[0] * sx, pt[1] * sy, 4.5, 0, 2 * Math.PI);
+            this.overlayCtx.arc(jx, jy, radius, 0, 2 * Math.PI);
+            this.overlayCtx.fillStyle = isHead ? '#ffd166' : themeColor;
+            this.overlayCtx.fill();
+
+            // Inner white core
+            this.overlayCtx.beginPath();
+            this.overlayCtx.arc(jx, jy, radius * 0.45, 0, 2 * Math.PI);
             this.overlayCtx.fillStyle = '#ffffff';
             this.overlayCtx.fill();
-            this.overlayCtx.strokeStyle = themeColor;
-            this.overlayCtx.stroke();
           }
         });
 
@@ -578,12 +649,12 @@ class EdgeVisionClient {
         const headPt = kpts[0];
         if (headPt && headPt[2] > 0.15) {
           const hx = headPt[0] * sx;
-          const hy = Math.max(30, (headPt[1] * sy) - 20);
+          const hy = Math.max(28, (headPt[1] * sy) - 18);
           this.overlayCtx.save();
           this.overlayCtx.translate(hx, hy);
           this.overlayCtx.scale(-1, 1); // Compensates for CSS scaleX(-1) so text reads left-to-right
           this.overlayCtx.fillStyle = themeColor;
-          this.overlayCtx.font = "600 14px Inter, system-ui, sans-serif";
+          this.overlayCtx.font = "600 13px Inter, system-ui, sans-serif";
           this.overlayCtx.textAlign = "center";
           this.overlayCtx.fillText(`${s2.posture} · [${s3.state}]`, 0, 0);
           this.overlayCtx.restore();

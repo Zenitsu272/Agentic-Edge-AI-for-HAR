@@ -158,11 +158,12 @@ function pipelineView() {
 
           <!-- LEFT: Camera Feed -->
           <div class="pipe-video-col">
-            <div class="video-wrapper" style="aspect-ratio: 4/3; position: relative;">
-              <video id="videoFeed" class="video-stream" autoplay playsinline muted></video>
-              <img id="serverFrameFeed" class="video-stream" style="display:none; width:100%; height:100%; object-fit:cover; position:absolute; top:0; left:0; z-index:1;" />
+            <div class="video-wrapper">
+              <video id="videoFeed" class="video-stream" autoplay playsinline muted style="object-fit: contain;"></video>
+              <img id="serverFrameFeed" class="video-stream" style="display:none; width:100%; height:100%; object-fit:contain; position:absolute; top:0; left:0; z-index:1;" />
               <canvas id="overlayCanvas" class="overlay-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:2; pointer-events:none;"></canvas>
               <div class="stream-badge"><div class="dot"></div> Camera 01 · Edge Inference</div>
+              <button id="viewToggleBtn" class="view-toggle-btn" onclick="toggleViewFitMode()" title="Toggle Full View / Fill View">⛶ Full View</button>
             </div>
             <div id="pipelineAlertBanner" class="alert-banner" style="margin-top: 8px;">
               ${icon('alert', 18)}
@@ -580,6 +581,17 @@ function stopWebcam() {
     window.edgeVision.stopCamera();
   }
 }
+
+window.toggleViewFitMode = function() {
+  const video = document.getElementById('videoFeed');
+  const img = document.getElementById('serverFrameFeed');
+  const btn = document.getElementById('viewToggleBtn');
+  const currentFit = (video && video.style.objectFit) || 'contain';
+  const newFit = currentFit === 'contain' ? 'cover' : 'contain';
+  if (video) video.style.objectFit = newFit;
+  if (img) img.style.objectFit = newFit;
+  if (btn) btn.innerHTML = newFit === 'contain' ? '⛶ Full View' : '⛶ Fill Crop';
+};
 
 // Initial start on unified pipeline and load SQLite alerts
 pipelineView();

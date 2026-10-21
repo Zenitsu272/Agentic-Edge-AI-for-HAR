@@ -95,29 +95,44 @@ class InferencePipeline:
         now = timestamp if timestamp is not None else t0
         self.frame_buffer.append(frame)
 
-        # --- STAGE 1: PERSON PRESENCE, TRACKING & MOTION ---
+        # --- STAGE 1 & 2: UNIFIED PRESENCE & BIOMECHANICAL POSE INFERENCE ---
         flux_pct, motion_active = self.compute_motion_flux(frame)
-        motion_results = self.motion_model.predict(frame, classes=[0], conf=0.20, device=self.device, verbose=False)
+        
+        # Primary: Run YOLO11n-Pose which outputs both person bounding boxes and 17 COCO keypoints
+        pose_results = self.pose_model.predict(frame, conf=0.15, device=self.device, verbose=False)
         
         persons_count = 0
         boxes = []
-        for r in motion_results:
-            for box in r.boxes:
-                persons_count += 1
-                b = box.xyxy[0].tolist()
-                conf = float(box.conf[0])
-                boxes.append({
-                    "x1": round(b[0]),
-                    "y1": round(b[1]),
-                    "x2": round(b[2]),
-                    "y2": round(b[3]),
-                    "conf": round(conf, 2)
-                })
+        for r in pose_results:
+            if r.boxes is not None:
+                for box in r.boxes:
+                    persons_count += 1
+                    b = box.xyxy[0].tolist()
+                    conf = float(box.conf[0])
+                    boxes.append({
+                        "x1": round(b[0]),
+                        "y1": round(b[1]),
+                        "x2": round(b[2]),
+                        "y2": round(b[3]),
+                        "conf": round(conf, 2)
+                    })
 
-        # --- STAGE 2: BIOMECHANICAL POSTURE ESTIMATION ---
-        # Dual-stream verification: YOLO11n-Pose is trained specifically on human keypoints across all orientations.
-        # Running pose detection guarantees that prone/collapsed/fallen subjects are NEVER missed when standard object bboxes drop confidence.
-        pose_results = self.pose_model.predict(frame, conf=0.15, device=self.device, verbose=False)
+        # Dual-stream safety fallback: If pose model missed person but frame differencing detected motion
+        if persons_count == 0 and motion_active:
+            motion_results = self.motion_model.predict(frame, classes=[0], conf=0.20, device=self.device, verbose=False)
+            for r in motion_results:
+                if r.boxes is not None:
+                    for box in r.boxes:
+                        persons_count += 1
+                        b = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        boxes.append({
+                            "x1": round(b[0]),
+                            "y1": round(b[1]),
+                            "x2": round(b[2]),
+                            "y2": round(b[3]),
+                            "conf": round(conf, 2)
+                        })
         
         posture = "Awaiting Subject"
         posture_category = "Unknown"
