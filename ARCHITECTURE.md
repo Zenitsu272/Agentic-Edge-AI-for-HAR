@@ -1,7 +1,7 @@
 # CareWatch Edge AI Platform — System Architecture & Implementation Specification
 
 ## 1. System Overview
-CareWatch is an enterprise-grade Edge-First Human Activity Recognition (HAR) and Fall-Detection platform designed for elderly monitoring, home healthcare, and assisted living facilities. It executes low-latency posture kinematics on local GPU edge hardware (NVIDIA RTX 3050 6GB CUDA) and coordinates a bounded, tool-using ReAct agent with persistent semantic memory (ChromaDB) and relational audit logging (SQLite).
+CareWatch is an enterprise-grade Edge-First Human Activity Recognition (HAR) and Fall-Detection platform designed for elderly monitoring, home healthcare, and assisted living facilities. It executes low-latency posture kinematics on host CPU hardware, runs a 4-bit quantized Vision-Language Model (Qwen2.5-VL-3B-Instruct) on local GPU edge hardware (NVIDIA RTX 3050 6GB CUDA), and coordinates a bounded LangGraph multi-agent workflow with persistent semantic memory (ChromaDB) and relational audit logging (SQLite).
 
 ---
 
