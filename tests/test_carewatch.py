@@ -451,14 +451,14 @@ class TestCareWatchPlatform:
 
     # 22. P1-6 Genuine System Health Reports Unconfigured and Fallback State
     def test_system_health_genuine_reporting(self):
-        from main import get_system_health
+        from main import get_system_health, VLM_ENABLED
         health = get_system_health()
         assert health["status"] in ["ONLINE", "DEGRADED", "UNAVAILABLE"]
         comps = health["components"]
         assert comps["remote_notification_provider"]["status"] == "NOT_CONFIGURED"
         assert comps["person_detector"]["status"] == "ONLINE"
         assert comps["pose_estimator"]["status"] == "ONLINE"
-        assert comps["langgraph_orchestration"]["status"] == "ONLINE"
+        assert comps["langgraph_orchestration"]["status"] == ("ONLINE" if VLM_ENABLED else "DISABLED")
 
     # 23. P1-7 Historical Memory Cannot Independently Turn Non-Fall into Fall
     def test_historical_memory_cannot_fabricate_fall(self):

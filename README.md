@@ -1,93 +1,68 @@
-# CareWatch: Agentic Edge AI for Human Activity Recognition & Fall Detection
+# CareWatch — pose-based activity monitoring
 
-CareWatch is an enterprise-grade Edge-First Human Activity Recognition (HAR) and Fall Detection platform designed for elderly healthcare monitoring, hospital rooms, and assisted living residences.
+CareWatch runs a local camera/replay dashboard with body landmarks, independent person tracks, posture details, temporal fall observation, SQLite activity/alert history, ChromaDB memory search and saved benchmark results.
 
-The platform executes real-time vision inference on local edge hardware (NVIDIA RTX 3050 6GB GPU), combined with a bounded ReAct agent, multimodal Vision-Language Model (VLM) verification, ChromaDB persistent semantic memory, and deterministic escalation policies.
+## Current focus: stage 2
 
----
+`pose-temporal-v2.2` replaces the previous pixel-threshold classifier. The three priority outputs are **Standing**, **Sitting**, and **Fall**. Partial, uncertain and already-lying states remain explicit so missing evidence is not forced into one of those labels.
 
-## Key Features
+- Uses confidence-filtered shoulders, hips, knees and ankles. Missing ankles are **not** evidence of sitting.
+- Uses torso-normalized thigh geometry and knee angles rather than fixed pixel distances or arm-dependent bounding-box proportions.
+- Keeps state separately for each person and each camera/replay connection.
+- Confirms a fall after observed rapid torso descent/rotation and a sustained down pose (at least 1.2 seconds and six observations). A static lying pose, brief bend, or observation gap cannot confirm a fall.
+- A sudden collapse from a previously observed standing or sitting pose immediately displays **Fall detected** with a **possible / partial fall** qualifier. This includes rapid shoulder descent when hips become occluded; losing keypoints alone cannot trigger it. Early warning requires strong normalized downward speed and posture change, while full confirmation keeps the stricter thresholds and dwell requirement above.
+- Any possible/partial or confirmed fall alert stays visible for at least 10 seconds of real time, including when the person recovers or leaves the frame. A partial incident retains its ID when confirmed; a new incident restarts the hold. The API separates `fall_alert_active` from the stricter `fall_confirmed` flag.
+- Cropped upright torsos may show **Standing · limited view**, explicitly provisional. A seated and standing person can have indistinguishable upper-body crops; show hips and knees for stronger evidence.
+- VLM/agent verification remains disabled by default. Existing history and memory remain accessible.
 
-1. **Edge Inference Pipeline**:
-   - **Person Presence & Motion**: YOLOv8n detector with pixel-level frame differencing.
-   - **Centroid Tracking**: Per-person track IDs (`Track #1`), movement status (`Stationary` vs `Active Movement`), and normalized displacement.
-   - **Biomechanical Posture Estimation**: YOLO11n-Pose (17 COCO keypoints), torso tilt angle relative to vertical, and full-body aspect ratio.
-   - **Temporal Fall State Machine**: Multi-frame candidate debounce, downward velocity gating (>85 px/s), ground dwell timer (>1.5s), and immediate recovery detection.
-2. **Central Agentic Orchestration**:
-   - **Bounded ReAct Agent**: Tool-using loop (maximum 4 steps, timeout-guarded).
-   - **ChromaDB Semantic Memory**: Persistent vector collection indexing baseline habits and past empirical incidents.
-   - **VLM Verification Adapter**: Evaluates candidate event frames with transparent availability reporting (`ONLINE` vs `WEIGHTS_INCOMPLETE` vs `RULE_BASED_FALLBACK`).
-   - **Deterministic Escalation Policy**: Clear state transitions (`EMERGENCY / ALERT`, `WARNING / REVIEW`, `NORMAL / LOG`, `UNCERTAIN`).
-3. **Dual Persistent Storage**:
-   - **SQLite (`carewatch.db`)**: Complete relational audit log of events, human acknowledgements, and agent traces.
-   - **ChromaDB (`./chroma_db`)**: Persistent high-dimensional semantic vector storage.
-4. **Interactive Dashboard**:
-   - **Live Pipeline View**: Compact single-viewport interface with real-time video stream, overlaid skeleton canvas, and unified output cards.
-   - **Video Replay Mode**: Reproducible video-replay simulation for pre-deployment validation.
-   - **ChromaDB Memory Search**: Natural language similarity search against historical resident profiles.
-   - **Measured Benchmark**: Empirical accuracy, precision, recall, F1-score, and tail latency on staged recordings.
-   - **Safety Decisions & Audit Feed**: Real-time event log with persistent acknowledgements.
+The network uses official pretrained YOLO pose weights; it has **not** been fine-tuned on a new labeled fall dataset. The changes are a larger pose estimator plus a new geometric/temporal activity classifier. Evidence scores represent rule support, not calibrated probabilities.
 
----
+## Run
 
-## System Requirements
+From this repository, using the configured local environment:
 
-- **Operating System**: Windows 10/11 or Linux
-- **Python**: Python 3.10 or 3.11 (Recommended: `E:\spaceborn-ai-team\.venv311`)
-- **Acceleration**: NVIDIA GPU with CUDA 12.x+ (Tested on RTX 3050 6GB Laptop GPU) or CPU fallback
-- **Dependencies**: PyTorch 2.5.1+cu121, Ultralytics YOLO, ChromaDB, FastAPI, Uvicorn, OpenCV
+~~~powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+~~~
 
----
+Open <http://127.0.0.1:8000>. Start a camera or replay a video. **Full View** uses native fullscreen; embedded browsers that block fullscreen use the available browser viewport. Escape exits.
 
-## Getting Started
+Python 3.12 is working locally. Packages include torch, ultralytics, opencv-python, numpy, fastapi, uvicorn, python-multipart, chromadb and langgraph. Use a CUDA-compatible PyTorch build for GPU inference.
 
-### 1. Launch the Backend Server
-```powershell
-# Using the configured virtual environment
-& "E:\spaceborn-ai-team\.venv311\Scripts\python.exe" -m uvicorn main:app --host 0.0.0.0 --port 8000
-```
+The repository includes `models/yolo11s-pose.pt`, the preferred pose model. The pipeline uses CUDA when available and falls back to bundled `yolo11n-pose.pt` if that file is absent.
 
-### 2. Access the Monitoring Dashboard
-Open your web browser and navigate to:
-```
-http://127.0.0.1:8000
-```
+Optional environment variables: `CAREWATCH_DEVICE=cpu`, `CAREWATCH_IMAGE_SIZE=640`, `CAREWATCH_POSE_MODEL=<path>`. Default GPU input is 960 pixels. `CAREWATCH_ENABLE_VLM=1` restores the optional agent path, subject to model availability.
 
-### 3. Run Camera or Video Replay
-- Click **Start** to connect your live webcam.
-- Click **Replay Video** to select a recorded test clip (e.g. `Recording 2026-10-20 130626.mp4`) and run reproducible offline simulation through the full pipeline.
+## Validation and further tuning
 
----
+~~~powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_pose_activity.py tests/test_pose_mode.py -q
+node --test tests/pose-overlay.test.cjs
+~~~
 
-## Testing & Benchmark
+Tests cover scaled/mirrored standing and sitting, missing/low-confidence joints, raised arms, bending, noise, sustained falls, resting, slow lowering, recovery, observation gaps, person ordering, replay resets, and both supplied standing screenshots. `data/pose_regressions.json` stores extracted keypoint coordinates, not images. The source screenshots already contain overlays, so they are regression cases rather than a clean evaluation dataset.
 
-### Run the Automated Test Suite (10 Comprehensive Tests)
-```powershell
-& "E:\spaceborn-ai-team\.venv311\Scripts\python.exe" -m pytest tests\test_carewatch.py -v
-```
+For a new **single-person** raw video, annotate time segments in JSON:
 
-### Run the Empirical Benchmark Evaluation
-```powershell
-& "E:\spaceborn-ai-team\.venv311\Scripts\python.exe" benchmark_evaluation.py
-```
+~~~json
+[
+  {"start": 0, "end": 5, "label": "Standing"},
+  {"start": 5, "end": 10, "label": "Sitting"},
+  {"start": 11, "end": 14, "label": "Fall"}
+]
+~~~
 
----
+~~~powershell
+.\.venv\Scripts\python.exe scripts/evaluate_activity.py clip.mp4 labels.json --output data/activity_evaluation.json
+~~~
 
-## Verified Evaluation Results
+This writes frame-level confusion counts, per-class recall, latency, provisional flags and the prediction timeline. Unknown predictions count as errors. It does not validate fall event recall or train new weights. Use separate people/camera positions for tuning and held-out evaluation.
 
-Evaluated on `Recording 2026-10-20 130626.mp4` (Continuous Staged Activities & Falls):
+Saved 100% results in `data/benchmark_results.json` are **historical measurements of the previous pipeline**, not validation of v2. The UI labels them accordingly. Raw labeled sitting and fall clips were not present locally, so no real-video accuracy is claimed for the new classifier. Occlusion, camera movement, identity crossings, deliberate fast lying down and falls directly toward/away from the lens remain challenging.
 
-| Metric | Measured Value | Notes |
-|---|---|---|
-| **Event Precision** | **100.0%** | 0 false alerts during 35s–70s seated reading & forward reach |
-| **Event Recall** | **100.0%** | Both ground collapse events detected at 79.0s and 86.5s |
-| **F1-Score** | **100.0%** | Event-level incident evaluation |
-| **Avg Pipeline Latency** | **39.3 ms** | Real-time GPU execution (~22.7 FPS throughput) |
-| **P95 Tail Latency** | **52.4 ms** | Sub-60ms bounded latency on RTX 3050 |
-| **Detection Delay** | **1.5 s** | Gated temporal verification window |
-| **False Alerts per Hour**| **0.0** | Robust posture separation (Sitting vs Lying vs Fall) |
+## References
 
----
+- [Ultralytics pose output and keypoint confidence](https://docs.ultralytics.com/tasks/pose/)
+- [Posture transitions and temporal fall detection](https://www.mdpi.com/2313-433X/7/3/42)
 
-## Architectural Documentation
-For in-depth architecture diagrams, data schemas, API contracts, and failure modes, refer to [`ARCHITECTURE.md`](file:///e:/human-fall-detection/Agentic-Edge-AI-for-HAR/ARCHITECTURE.md).
+These motivate confidence-aware geometry and temporal checks; they do not validate this implementation's thresholds.

@@ -1,598 +1,164 @@
-// CareWatch Product Frontend: Edge AI + Central VLM & ChromaDB Agentic Architecture
-
-let liveAlerts = [
-  {
-    alert_id: 'EVT-1002',
-    timestamp: '16:18:22',
-    severity: 'CRITICAL EMERGENCY',
-    type: 'Confirmed Fall Incident',
-    details: 'Camera 01: VLM & ChromaDB verified downward collapse (92.1 px/s drop, 13.1s ground dwell). Matched empirical baseline EVT-BM-01 in ChromaDB.',
-    posture_trajectory: 'Standing → Rapid Drop (92.1 px/s) → Floor Dwell (13.1s)',
-    acknowledged: false
-  },
-  {
-    alert_id: 'EVT-1001',
-    timestamp: '16:02:14',
-    severity: 'ROUTINE AUDIT',
-    type: 'System Baseline Active',
-    details: 'Edge AI (YOLOv8n + YOLO11n-Pose) operational on RTX 3050 CUDA. Central ChromaDB agent memory connected.',
-    posture_trajectory: 'Camera 01 Init → Continuous Edge Monitoring',
-    acknowledged: true
-  },
-  {
-    alert_id: 'EVT-1000',
-    timestamp: '15:58:30',
-    severity: 'MONITORING NOTICE',
-    type: 'Controlled Sitting Transition',
-    details: 'Camera 01: Subject seated in armchair. Forward reach detected without vertical drop velocity (0 false alarms).',
-    posture_trajectory: 'Standing → Sitting (Leaning Forward)',
-    acknowledged: true
-  }
-];
-
-const measuredBenchmark = {
-  sequence: "Recording 2026-10-20 130626.mp4 (Continuous Staged Activities & Falls)",
-  hardware: "NVIDIA GeForce RTX 3050 6GB Laptop GPU (CUDA 13.0, Torch 2.5.1+cu121)",
-  frames: 3743,
-  duration: "124.8s (2m 05s)",
-  precision: "100.0%",
-  recall: "100.0%",
-  f1: "100.0%",
-  falsePositivesSitting: 0,
-  latency: "39.3 ms",
-  throughput: "22.7 FPS",
-  detectionDelay: "1.5 s"
-};
-
-function icon(name, size = 18) {
-  const p = {
-    grid: '<rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/>',
-    users: '<path d="M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-3A4.5 4.5 0 0 0 4 18.5V20"/><circle cx="10" cy="7" r="3"/><path d="M16 4.5a3 3 0 0 1 0 5.8M18 14.1a4.5 4.5 0 0 1 3 4.2V20"/>',
-    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
-    activity: '<path d="M3 12h4l2.2-7L14 19l2-7h5"/>',
-    arrow: '<path d="m9 18 6-6-6-6"/>',
-    back: '<path d="m15 18-6-6 6-6"/>',
-    clock: '<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>',
-    check: '<path d="m5 12 4 4L19 6"/>',
-    alert: '<path d="M10.3 4.2 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0ZM12 9v4m0 3h.01"/>',
-    logout: '<path d="M10 17l5-5-5-5M15 12H3M21 19V5a2 2 0 0 0-2-2h-5"/>',
-    heart: '<path d="M20.8 8.8c0 5.2-8.8 10-8.8 10s-8.8-4.8-8.8-10A4.8 4.8 0 0 1 12 6.5a4.8 4.8 0 0 1 8.8 2.3Z"/>',
-    camera: '<path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
-    layers: '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
-    database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
-    brain: '<path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z"/>',
-    cpu: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>'
-  };
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p[name] || p.grid}</svg>`;
-}
-
-const logo = `<span class="brand-mark">${icon('heart', 20)}</span><span>CareWatch</span>`;
-const app = document.getElementById('app');
-let activeView = 'pipeline';
-
-function sidebar() {
-  const items = [
-    ['pipeline', 'Live Pipeline', 'layers'],
-    ['memory', 'ChromaDB Memory', 'database'],
-    ['benchmark', 'Measured Benchmark', 'cpu'],
-    ['alerts', 'Alert Feed', 'bell']
-  ];
-  return `
-    <aside class="sidebar">
-      <div class="brand-lockup">${logo}</div>
-      <nav class="sidebar-nav">
-        <div class="nav-label">Enterprise Product</div>
-        ${items.map(([id, label, ico]) => `
-          <button class="nav-button ${activeView === id ? 'active' : ''}" data-view="${id}">
-            ${icon(ico)}<span>${label}</span>
-          </button>
-        `).join('')}
-      </nav>
-      <div class="sidebar-spacer"></div>
-      <div class="sidebar-user">
-        <span class="avatar">CW</span>
-        <div>
-          <strong>CareWatch Edge</strong>
-          <span>RTX 3050 CUDA · ChromaDB</span>
-        </div>
-      </div>
-    </aside>
-  `;
-}
-
-function topbar(title, subtitle) {
-  return `
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">CareWatch Edge AI Platform · Single Camera Monitoring</div>
-        <h1>${title}</h1>
-        <p>${subtitle}</p>
-      </div>
-      <div class="topbar-actions">
-        <span id="camStatusBadge" class="badge stable" style="font-size: 12px; padding: 6px 12px;">
-          SYSTEM READY
-        </span>
-      </div>
-    </header>
-  `;
-}
-
-// ========== COMPACT SINGLE-VIEWPORT PIPELINE VIEW ==========
-function pipelineView() {
-  activeView = 'pipeline';
-
-  app.innerHTML = `
-    <div class="workspace">
-      ${sidebar()}
-      <main class="main pipeline-main">
-
-        <!-- TOP BAR: slim title + global status chips -->
-        <div class="pipe-topbar">
-          <div class="pipe-title-row">
-            <div>
-              <div class="eyebrow">CareWatch Edge AI Platform · Camera 01</div>
-              <h1 class="pipe-h1">Live Detection Pipeline</h1>
-            </div>
-            <div class="pipe-status-chips">
-              <span id="camStatusBadge" class="chip chip-sage">● STREAM LIVE · RTX 3050 CUDA</span>
-              <span id="globalStateBadge" class="chip chip-muted">STABLE</span>
-            </div>
-          </div>
-          <!-- Inline metric bar -->
-          <div class="pipe-metric-bar">
-            <div class="pmetric"><span>Latency</span><strong id="mLatency">-- ms</strong></div>
-            <div class="pmetric"><span>Person</span><strong id="mPresence">Idle</strong></div>
-            <div class="pmetric"><span>Posture</span><strong id="mPosture">--</strong></div>
-            <div class="pmetric"><span>State</span><strong id="mState" class="state-txt">STABLE</strong></div>
-            <div class="pmetric pmetric-action">
-              <input type="file" id="videoReplayInput" accept="video/*,.avi,.mp4,.webm,.mkv,.mov,.wmv" style="display:none;" onchange="handleVideoFile(this)" />
-              <button class="btn-sm btn-primary-sm" onclick="startWebcam()">${icon('camera', 14)} Start</button>
-              <button class="btn-sm btn-outline-sm" onclick="triggerVideoReplay()">${icon('activity', 14)} Replay Video</button>
-              <button class="btn-sm btn-outline-sm" onclick="stopWebcam()">Stop</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- MAIN DASHBOARD GRID: video left, outputs right -->
-        <div class="pipe-grid">
-
-          <!-- LEFT: Camera Feed -->
-          <div class="pipe-video-col">
-            <div class="video-wrapper">
-              <video id="videoFeed" class="video-stream" autoplay playsinline muted style="object-fit: contain;"></video>
-              <img id="serverFrameFeed" class="video-stream" style="display:none; width:100%; height:100%; object-fit:contain; position:absolute; top:0; left:0; z-index:1;" />
-              <canvas id="overlayCanvas" class="overlay-canvas" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:2; pointer-events:none;"></canvas>
-              <div class="stream-badge"><div class="dot"></div> Camera 01 · Edge Inference</div>
-              <button id="viewToggleBtn" class="view-toggle-btn" onclick="toggleViewFitMode()" title="Toggle Full View / Fill View">⛶ Full View</button>
-            </div>
-            <div id="pipelineAlertBanner" class="alert-banner" style="margin-top: 8px;">
-              ${icon('alert', 18)}
-              <div>
-                <strong style="color: #8e4837; font-size: 13px;">CRITICAL EMERGENCY: Verified Fall!</strong>
-                <p style="margin: 2px 0 0; font-size: 11px; color: #8e4837;">Temporal state machine confirmed drop + floor dwell. VLM verified unrecovered posture.</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- RIGHT: Compact Output Panels -->
-          <div class="pipe-outputs-col">
-
-            <!-- STAGE 1 -->
-            <div class="out-card">
-              <div class="out-card-hdr">
-                <span class="stage-num">1</span>
-                <span class="out-card-title">Person Presence & Motion Gate</span>
-                <span id="pPresenceBadge" class="chip chip-sage">Person Detected</span>
-              </div>
-              <div class="out-rows">
-                <div class="out-row"><span>Presence</span><strong id="pPresenceText">SCENE IDLE</strong></div>
-                <div class="out-row"><span>Motion Flux</span>
-                  <div class="flux-inline">
-                    <div class="flux-track-sm"><div id="pMotionFluxBar" class="flux-fill"></div></div>
-                    <strong id="pMotionFlux">0.0%</strong>
-                  </div>
-                </div>
-                <div class="out-row"><span>Activity</span><strong id="pMotionActivity" style="color:var(--sage)">Stationary</strong></div>
-              </div>
-            </div>
-
-            <!-- STAGE 2+3 COMBINED: Posture + Temporal State -->
-            <div class="out-card">
-              <div class="out-card-hdr">
-                <span class="stage-num">2</span>
-                <span class="out-card-title">Posture & Temporal State</span>
-                <span id="pPostureBadge" class="chip chip-sage">Standing</span>
-                <span id="pStateBadge" class="chip chip-muted" style="margin-left:4px;">STABLE</span>
-              </div>
-              <div class="out-rows">
-                <div class="out-row"><span>Posture</span><strong id="pPostureText">Standing</strong></div>
-                <div class="out-row"><span>Torso Angle</span><strong id="pTorsoAngle">0.0°</strong></div>
-                <div class="out-row"><span>BBox Aspect</span><strong id="pAspectRatio">0.0</strong></div>
-                <div class="out-row out-divider"><span>State</span><strong id="pStateText" style="color:var(--clay)">Normal Monitoring (Stable)</strong></div>
-                <div class="out-row"><span>Drop Velocity</span><strong id="pDropVelocity">0.0 px/s</strong></div>
-                <div class="out-row"><span>Floor Dwell</span><strong id="pGroundDwell">0.0 s</strong></div>
-              </div>
-            </div>
-
-
-            <!-- STAGE 4: VLM + ChromaDB -->
-            <div class="out-card out-card-central">
-              <div class="out-card-hdr">
-                <span class="stage-num stage-num-clay">VLM</span>
-                <span class="out-card-title">${icon('brain', 14)} Qwen2.5-VL · ChromaDB Agent</span>
-                <span id="cDecisionBadge" class="chip chip-muted">NORMAL / LOG</span>
-              </div>
-              <div class="out-rows">
-                <div class="out-row"><span>VLM Confidence</span><strong id="cVlmConf" class="chip chip-sage" style="font-size:11px;">94%</strong></div>
-                <div class="out-row"><span>Scene Observation</span></div>
-                <div id="cVlmObs" class="out-text-box">Indeterminate visual orientation. Monitoring dwell duration.</div>
-                <div class="out-row" style="margin-top:4px;"><span>Memory Match</span><strong id="cMemoryScore" style="font-size:11px;color:var(--muted)">92.4%</strong></div>
-                <div id="cMemoryDoc" class="out-text-box out-text-memory">Camera 01 Baseline: Stable upright and seated postures indexed.</div>
-                <div class="out-row" style="margin-top:4px;"><span>Agentic Action</span><strong id="cActionText" style="color:var(--clay);font-size:12px;">Log · Monitoring active</strong></div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </main>
-    </div>
-  `;
-
-  bindEvents();
-}
-
-// ===================== CHROMADB MEMORY VIEW ===================
-async function memoryView() {
-  activeView = 'memory';
-  if (window.edgeVision) window.edgeVision.stopCamera();
-
-  app.innerHTML = `
-    <div class="workspace">
-      ${sidebar()}
-      <main class="main">
-        ${topbar('ChromaDB Agent Memory', 'Semantic Vector Database storing empirical activity baselines, past collapse occurrences, and verified event trajectories.')}
-
-        <section class="surface">
-          <div class="surface-header">
-            <div>
-              <h2>Semantic Memory Search</h2>
-              <p>Query ChromaDB vectors using natural language description of an activity or fall sequence</p>
-            </div>
-            <span class="badge stable">CHROMADB PERSISTENT</span>
-          </div>
-
-          <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-            <input type="text" id="memorySearchInput" placeholder="e.g. subject collapsed near armchair with rapid drop velocity and prolonged dwell..." style="flex: 1; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;" />
-            <button class="btn btn-primary" onclick="searchChromaMemory()">Semantic Query</button>
-          </div>
-
-          <div id="memoryResultsContainer" style="display: grid; gap: 12px;">
-            <div style="padding: 16px; text-align: center; color: var(--muted); font-size: 13px;">Loading persistent empirical vectors from ChromaDB...</div>
-          </div>
-        </section>
-      </main>
-    </div>
-  `;
-
-  bindEvents();
-  loadChromaMemories();
-}
-
-async function loadChromaMemories() {
-  const container = document.getElementById('memoryResultsContainer');
-  if (!container) return;
+// Camera, landmarks and live activity.
+document.getElementById('app').innerHTML = `
+<div class="workspace">
+<aside class="sidebar">
+<a class="brand" href="/"><span class="brand-icon">♡</span>CareWatch</a>
+<p class="nav-caption">EDGE ACTIVITY MONITOR</p>
+<nav aria-label="Main navigation"><button class="nav-item active" data-page="live">◉ <span>Live pipeline</span></button><button class="nav-item" data-page="history">◷ <span>Activity & alerts</span></button><button class="nav-item" data-page="memory">▤ <span>ChromaDB memory</span></button><button class="nav-item" data-page="benchmark">▥ <span>Measured benchmark</span></button></nav>
+</aside>
+<main class="dashboard">
+<header class="dashboard-header"><div><span class="eyebrow">CAREWATCH EDGE AI PLATFORM · CAMERA 01</span><h1 id="pageHeading">Live detection pipeline</h1><p id="pageSubtitle">Person tracking, body keypoints and activity recognition.</p></div><span id="systemStatus" class="pill">Connecting to server</span></header>
+<div id="livePage" class="page-panel">
+<div class="summary-grid"><div class="summary-card"><span>Standing</span><strong id="standingCount">0</strong><small>Upright posture</small></div><div class="summary-card"><span>Sitting</span><strong id="sittingCount">0</strong><small>Seated geometry</small></div><div class="summary-card fall-summary"><span>Fall</span><strong id="fallCount">0</strong><small>Rapid descent + sustained down pose</small></div><div class="summary-card"><span>Inference</span><strong id="inferenceMetric">—</strong><small id="modelMetric">Loading model status</small></div></div>
+<div class="live-grid"><div class="video-column">
+<section id="cameraView" class="camera-view" aria-label="Live camera and activity">
+<video id="videoFeed" autoplay playsinline muted></video><img id="serverFrameFeed" alt="Video replay" hidden><canvas id="overlayCanvas" aria-label="Detected body keypoints"></canvas>
+<div class="camera-toolbar"><span id="cameraStatus" class="camera-status">Camera off</span><div class="controls"><button id="startButton" class="primary">Start camera</button><button id="replayButton">Replay video</button><button id="stopButton" disabled>Stop</button><button id="fullscreenButton" aria-pressed="false">⛶ Full View</button><input type="file" id="replayInput" accept="video/*,.avi,.mkv,.mov" hidden></div></div>
+<div id="emptyState" class="empty-state"><span class="camera-icon" aria-hidden="true">◎</span><h2>Ready to observe</h2><p>Start a camera or replay a video.<br>Keep shoulders, hips and knees in view.</p></div>
+<div class="activity-bar"><div class="activity-main"><span class="eyebrow">Primary activity</span><strong id="activityLabel" aria-live="polite">Awaiting subject</strong><span id="activityHint">Standing, sitting and temporal fall detection.</span></div><div class="live-metrics"><span id="personCount">No person detected</span><span id="latencyLabel"></span></div></div>
+<p id="cameraError" class="error-message" role="alert" hidden></p></section>
+<div class="camera-caption"><span><i class="legend-dot"></i> Visible joints and skeleton</span><span>Each person is tracked independently</span></div>
+<div id="fallBanner" class="fall-banner" role="alert" hidden><strong>Fall detected</strong><span id="fallBannerDetail">Sudden fall-like motion detected. Check the person.</span></div>
+<section class="panel live-events"><div class="panel-heading"><h2>Recent activity</h2><span class="pill">This session</span></div><div id="sessionEvents" class="event-list"><p class="muted">Activity changes will appear here.</p></div></section>
+</div>
+<aside class="analysis-column">
+<section class="panel"><div class="panel-heading"><h2><span class="step-number">1</span>Person presence & motion</h2><span id="presenceBadge" class="pill">Idle</span></div><div class="metric-row"><span>People tracked</span><strong id="trackedMetric">0</strong></div><div class="metric-row"><span>Movement</span><strong id="movementMetric">—</strong></div><div class="metric-row"><span>Motion flux</span><strong id="fluxMetric">—</strong></div></section>
+<section class="panel"><div class="panel-heading"><h2><span class="step-number">2</span>Posture & temporal state</h2><span class="pill accent">Active</span></div><div id="personCards"><p class="muted">Waiting for visible body keypoints.</p></div></section>
+<section class="panel"><div class="panel-heading"><h2>Fall observation</h2><span id="fallState" class="pill">Monitoring</span></div><div class="metric-row"><span>Torso descent</span><strong id="descentMetric">—</strong></div><div class="metric-row"><span>Down-pose duration</span><strong id="dwellMetric">—</strong></div><p class="panel-note">A person already lying down is not automatically classified as a fall. Missing joints are marked as limited evidence.</p></section>
+<section class="panel paused-panel"><div class="panel-heading"><h2>VLM & central agent</h2><span class="pill">Paused</span></div><p class="panel-note">Pose-based recognition is active. Second-level VLM verification is disabled for now.</p></section>
+</aside></div></div>
+<section id="historyPage" class="page-panel panel" hidden><div class="panel-heading"><h2>Activity & alert feed</h2><button class="light-button" id="refreshHistory">Refresh</button></div><p class="panel-note">Persisted activity transitions and fall alerts. Older records retain their original detection method.</p><div id="historyList"></div></section>
+<section id="memoryPage" class="page-panel panel" hidden><div class="panel-heading"><h2>ChromaDB semantic memory</h2><span class="pill">Stored history</span></div><p class="panel-note">Review existing memories. They do not influence the current pose classification.</p><form id="memoryForm" class="search-form"><input id="memoryQuery" placeholder="Search stored memories" aria-label="Search stored memories"><button class="light-button">Search</button></form><div id="memoryList"></div></section>
+<section id="benchmarkPage" class="page-panel panel" hidden><div class="panel-heading"><h2>Measured benchmark</h2><span class="pill">Historical run</span></div><p class="notice">These saved measurements belong to the previous classifier. The new pose classifier needs a fresh labeled-video evaluation; these scores do not validate it.</p><div id="benchmarkContent"></div></section>
+</main></div>`;
+const cameraView = document.getElementById('cameraView');
+const fullscreenButton = document.getElementById('fullscreenButton');
+window.edgeVision = new EdgeVisionClient();
+async function startSource(file) {
+  document.getElementById('cameraError').hidden = true;
+  document.getElementById('startButton').disabled = true;
+  document.getElementById('replayButton').disabled = true;
   try {
-    const res = await fetch('/api/chroma_memories');
-    const data = await res.json();
-    if (data.memories && data.memories.length > 0) {
-      container.innerHTML = data.memories.map(m => `
-        <div style="padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: white; display: flex; flex-direction: column; gap: 6px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <strong style="font-size: 14px;">${m.id} · ${m.metadata.camera || 'Camera 01'}</strong>
-            <span class="badge ${m.metadata.severity === 'CRITICAL EMERGENCY' ? 'review' : 'stable'}">${m.metadata.category || 'Baseline'}</span>
-          </div>
-          <p style="margin: 0; font-size: 13px; color: var(--ink-soft); line-height: 1.4;">${m.document}</p>
-          <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
-            Source: ${m.metadata.source || 'Recording 2026-10-20 130626.mp4'} · Time: ${m.metadata.timestamp_sec != null ? m.metadata.timestamp_sec + 's' : 'Baseline'} · Drop: ${m.metadata.drop_velocity_px_s || 0} px/s · Dwell: ${m.metadata.dwell_sec || 0}s · Indexed in ChromaDB
-          </div>
-        </div>
-      `).join('');
-    } else {
-      container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--muted);">No memories found in collection.</div>';
-    }
-  } catch (err) {
-    container.innerHTML = `<div style="padding: 16px; color: var(--clay);">Error loading ChromaDB memories: ${err.message}</div>`;
+    if (file) await window.edgeVision.startReplay(file);
+    else await window.edgeVision.startCamera();
+  } catch (error) { window.edgeVision.fail(error.message); }
+  finally {
+    document.getElementById('startButton').disabled = false;
+    document.getElementById('replayButton').disabled = false;
   }
 }
-
-async function searchChromaMemory() {
-  const input = document.getElementById('memorySearchInput');
-  const container = document.getElementById('memoryResultsContainer');
-  if (!input || !container) return;
-  const q = input.value.trim();
-  if (!q) return;
-
-  container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--muted);">Searching vector space...</div>';
-  try {
-    const res = await fetch('/api/query_memory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, camera_id: 'Camera 01' })
-    });
-    const data = await res.json();
-    if (data.matches && data.matches.length > 0) {
-      container.innerHTML = data.matches.map(m => `
-        <div style="padding: 16px; border: 1.5px solid var(--clay); border-radius: 12px; background: #fdfaf4; display: flex; flex-direction: column; gap: 6px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <strong style="font-size: 14px; color: #8e4837;">Semantic Vector Match (Similarity: ${(m.similarity_score * 100).toFixed(1)}%)</strong>
-            <span class="badge ${m.metadata.severity === 'CRITICAL EMERGENCY' ? 'review' : 'stable'}">${m.metadata.category || 'Event Match'}</span>
-          </div>
-          <p style="margin: 0; font-size: 13px; color: var(--ink); line-height: 1.45;">${m.document}</p>
-          <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">Camera: ${m.metadata.camera || 'Camera 01'} · Source: ${m.metadata.source || 'Empirical Sequence'} · State: ${m.metadata.state || 'N/A'}</div>
-        </div>
-      `).join('');
-    } else {
-      container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--muted);">No close matches found.</div>';
-    }
-  } catch (err) {
-    container.innerHTML = `<div style="padding: 16px; color: var(--clay);">Query error: ${err.message}</div>`;
-  }
+document.getElementById('startButton').addEventListener('click', () => startSource());
+document.getElementById('stopButton').addEventListener('click', () => window.edgeVision.stop());
+document.getElementById('replayButton').addEventListener('click', () => document.getElementById('replayInput').click());
+document.getElementById('replayInput').addEventListener('change', event => {
+  const file = event.target.files[0];
+  if (file) startSource(file);
+  event.target.value = '';
+});
+function updateFullscreen() {
+  const expanded = document.fullscreenElement === cameraView || cameraView.classList.contains('expanded');
+  fullscreenButton.textContent = expanded ? '⤢ Exit full screen' : '⛶ Full View';
+  fullscreenButton.setAttribute('aria-pressed', String(expanded));
+  window.edgeVision.drawOverlay();
 }
-
-// =================== MEASURED BENCHMARK VIEW =================
-async function benchmarkView() {
-  activeView = 'benchmark';
-  if (window.edgeVision) window.edgeVision.stopCamera();
-
-  app.innerHTML = `
-    <div class="workspace">
-      ${sidebar()}
-      <main class="main">
-        ${topbar('Measured Benchmark Evaluation', 'Empirical performance on real staged sequence on RTX 3050 CUDA.')}
-
-        <section class="surface">
-          <div class="surface-header">
-            <div>
-              <h2 id="benchDatasetTitle">Benchmark Dataset: Loading empirical results...</h2>
-              <p id="benchDatasetDesc">Evaluating end-to-end Person Presence, Pose Estimation, and Temporal State Machine</p>
-            </div>
-            <span id="benchBadge" class="badge stable">CALCULATING</span>
-          </div>
-
-          <div class="bench-grid">
-            <div class="bench-card"><span>Event Precision</span><strong id="bPrecision" style="color: var(--sage);">--%</strong></div>
-            <div class="bench-card"><span>Event Recall</span><strong id="bRecall" style="color: var(--sage);">--%</strong></div>
-            <div class="bench-card"><span>False Alarms (Sitting/Lean)</span><strong id="bFalsePos" style="color: var(--sage);">--</strong></div>
-            <div class="bench-card"><span>F1-Score</span><strong id="bF1" style="color: var(--sage);">--%</strong></div>
-          </div>
-
-          <div class="bench-grid" style="margin-top: 14px;">
-            <div class="bench-card"><span>Evaluated Frames</span><strong id="bFrames">--</strong></div>
-            <div class="bench-card"><span>Clip Duration</span><strong id="bDuration">--</strong></div>
-            <div class="bench-card"><span>Avg Pipeline Latency</span><strong id="bLatency" style="color: var(--clay);">-- ms</strong></div>
-            <div class="bench-card"><span>Throughput</span><strong id="bThroughput" style="color: var(--clay);">-- FPS</strong></div>
-          </div>
-
-          <div style="margin-top: 24px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: white;">
-            <h3 style="margin: 0 0 10px; font-size: 15px;">Hardware & Test Configuration Details</h3>
-            <div class="stat-item"><span>Target Hardware</span><strong id="bHardware">--</strong></div>
-            <div class="stat-item"><span>P95 Tail Latency</span><strong id="bTailLatency">-- ms</strong></div>
-            <div class="stat-item"><span>Temporal Verification Dwell</span><strong id="bDelay">1.5s debounce window</strong></div>
-            <div class="stat-item"><span>Sitting / Forward Lean Stability</span><strong style="color: var(--sage);">0 false alarms during seated reading period</strong></div>
-            <div class="stat-item"><span>Floor Lying Classification</span><strong>Properly tagged as Lying/Resting without false fall alert</strong></div>
-            <div class="stat-item"><span>True Fall Detections</span><strong id="bFallsDetected" style="color: var(--clay);">2 confirmed collapse events</strong></div>
-          </div>
-        </section>
-      </main>
-    </div>
-  `;
-
-  bindEvents();
-
-  try {
-    const res = await fetch('/api/benchmark');
-    const data = await res.json();
-    if (data.status === 'success' && data.benchmark) {
-      const b = data.benchmark;
-      document.getElementById('benchDatasetTitle').innerText = `Benchmark Dataset: ${b.dataset_name}`;
-      document.getElementById('benchDatasetDesc').innerText = b.dataset_description || 'Staged empirical evaluation';
-      document.getElementById('benchBadge').innerText = `${b.event_level_precision_pct}% RECALL & PRECISION`;
-      document.getElementById('bPrecision').innerText = `${b.event_level_precision_pct}%`;
-      document.getElementById('bRecall').innerText = `${b.event_level_recall_pct}%`;
-      document.getElementById('bFalsePos').innerText = `${b.false_alerts_during_sitting_or_leaning}`;
-      document.getElementById('bF1').innerText = `${b.event_level_f1_pct}%`;
-      document.getElementById('bFrames').innerText = b.total_frames_evaluated.toLocaleString();
-      document.getElementById('bDuration').innerText = `${b.video_duration_sec}s`;
-      document.getElementById('bLatency').innerText = `${b.avg_inference_latency_ms} ms`;
-      document.getElementById('bThroughput').innerText = `${b.effective_throughput_fps} FPS`;
-      document.getElementById('bHardware').innerText = b.hardware;
-      document.getElementById('bTailLatency').innerText = `${b.p95_tail_latency_ms || b.median_latency_ms} ms`;
-      document.getElementById('bDelay').innerText = `${b.detection_delay_sec || 1.5}s debounce window`;
-      document.getElementById('bFallsDetected').innerText = `${b.true_positives} of ${b.ground_truth_events} verified events (TP=${b.true_positives}, FP=${b.false_positives}, FN=${b.false_negatives})`;
-    }
-  } catch (err) {
-    console.error("Error loading benchmark:", err);
-  }
-}
-
-// ================ RENDER ALERT CARDS =================
-function renderAlertCards() {
-  if (liveAlerts.length === 0) {
-    return `
-      <div style="padding: 16px; text-align: center; color: var(--muted); font-size: 13px; background: #faf9f6; border-radius: 10px;">
-        No incidents detected. Monitoring active.
-      </div>
-    `;
-  }
-  return liveAlerts.map(a => `
-    <div class="alert-card ${a.severity && a.severity.includes('CRITICAL') ? 'critical' : ''} ${a.acknowledged ? 'acknowledged' : ''}">
-      <div class="alert-card-top">
-        <strong style="font-size: 13px; color: ${a.severity && a.severity.includes('CRITICAL') ? '#8e4837' : 'var(--ink)'};">
-          ${a.type || 'Incident Event'}
-        </strong>
-        <span class="badge ${a.severity && a.severity.includes('CRITICAL') ? 'review' : 'stable'}" style="font-size: 10px;">
-          ${a.severity || 'NOTICE'}
-        </span>
-      </div>
-      <div style="font-size: 12px; color: var(--ink-soft); line-height: 1.4;">
-        ${a.details || ''}
-      </div>
-      <div class="alert-card-meta">
-        <span>🕒 ${a.timestamp || ''}</span>
-        <span>ID: ${a.alert_id || a.id}</span>
-        <span>${a.posture_trajectory || ''}</span>
-      </div>
-      <div class="alert-card-action">
-        ${a.acknowledged ?
-          `<span style="color: var(--sage); font-size: 11px; font-weight: 700;">✓ Acknowledged (Persisted in SQLite)</span>` :
-          `<button class="btn btn-outline" style="padding: 4px 10px; font-size: 11px;" onclick="acknowledgeAlert('${a.alert_id || a.id}')">Acknowledge</button>`
-        }
-      </div>
-    </div>
-  `).join('');
-}
-
-async function loadPersistedAlerts() {
-  try {
-    const res = await fetch('/api/alerts');
-    const data = await res.json();
-    if (data.alerts && data.alerts.length > 0) {
-      liveAlerts = data.alerts;
-      const feed = document.getElementById('pipelineAlertFeed');
-      const badge = document.getElementById('alertCountBadge');
-      if (feed) feed.innerHTML = renderAlertCards();
-      if (badge) badge.innerText = `${liveAlerts.length} Events`;
-    }
-  } catch (err) {
-    console.warn("Could not fetch persisted alerts:", err);
-  }
-}
-
-window.recordAlertEvent = function(alertObj) {
-  if (!alertObj) return;
-  const aid = alertObj.alert_id || alertObj.id;
-  const existing = liveAlerts.find(a => (a.alert_id === aid || a.id === aid));
-  if (!existing) {
-    liveAlerts.unshift(alertObj);
-    const feed = document.getElementById('pipelineAlertFeed');
-    const badge = document.getElementById('alertCountBadge');
-    if (feed) feed.innerHTML = renderAlertCards();
-    if (badge) badge.innerText = `${liveAlerts.length} Events`;
-  }
-};
-
-async function acknowledgeAlert(alertId) {
-  const alertItem = liveAlerts.find(a => (a.alert_id === alertId || a.id === alertId));
-  if (alertItem) {
-    alertItem.acknowledged = true;
+fullscreenButton.addEventListener('click', async () => {
+  if (document.fullscreenElement) await document.exitFullscreen();
+  else if (cameraView.classList.contains('expanded')) cameraView.classList.remove('expanded');
+  else {
     try {
-      await fetch(`/api/alerts/${encodeURIComponent(alertId)}/acknowledge`, { method: 'POST' });
-    } catch (e) {
-      console.warn("Acknowledge fetch error:", e);
-    }
-    const feed = document.getElementById('pipelineAlertFeed');
-    if (feed) feed.innerHTML = renderAlertCards();
-    if (activeView === 'alerts') alertsView();
+      if (!cameraView.requestFullscreen) throw new Error('Fullscreen unavailable');
+      await cameraView.requestFullscreen();
+    } catch { cameraView.classList.add('expanded'); }
   }
-}
+  updateFullscreen();
+});
+document.addEventListener('fullscreenchange', updateFullscreen);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { cameraView.classList.remove('expanded'); updateFullscreen(); }
+});
+window.addEventListener('pagehide', () => window.edgeVision.stop());
 
-// ================== DEDICATED ALERTS VIEW ==================
-async function alertsView() {
-  activeView = 'alerts';
-
-  app.innerHTML = `
-    <div class="workspace">
-      ${sidebar()}
-      <main class="main">
-        ${topbar('Safety Decisions & Audit Log', 'Real-time record of all temporal fall detections and posture transitions.')}
-        <section class="surface">
-          <div class="surface-header">
-            <div>
-              <h2>Audit Log Feed (${liveAlerts.length} Total Events)</h2>
-              <p>Chronological record with posture trajectories and persistent SQLite storage</p>
-            </div>
-            <button class="btn btn-primary" onclick="pipelineView()">
-              ${icon('layers')} View Live Pipeline
-            </button>
-          </div>
-
-          <div style="display: grid; gap: 12px; margin-top: 10px;">
-            ${renderAlertCards()}
-          </div>
-        </section>
-      </main>
-    </div>
-  `;
-
-  bindEvents();
-  await loadPersistedAlerts();
-  const alertCardsContainer = document.querySelector('.surface > div[style*="display: grid"]');
-  if (alertCardsContainer) {
-    alertCardsContainer.innerHTML = renderAlertCards();
-  }
-}
-
-function bindEvents() {
-  document.querySelectorAll('[data-view]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const v = btn.dataset.view;
-      if (v === 'pipeline') pipelineView();
-      else if (v === 'memory') memoryView();
-      else if (v === 'benchmark') benchmarkView();
-      else if (v === 'alerts') alertsView();
-    });
-  });
-}
-
-async function startWebcam() {
-  try {
-    await window.edgeVision.startCamera('videoFeed', 'overlayCanvas');
-  } catch (err) {
-    alert(err.message);
-  }
-}
-
-function triggerVideoReplay() {
-  const input = document.getElementById('videoReplayInput');
-  if (input) input.click();
-}
-
-async function handleVideoFile(inputEl) {
-  if (inputEl.files && inputEl.files[0]) {
-    const file = inputEl.files[0];
-    const fname = file.name.toLowerCase();
-    const isAvi = fname.endsWith('.avi') || file.type.includes('avi') || file.type.includes('msvideo') || fname.endsWith('.mkv') || fname.endsWith('.wmv');
-    try {
-      if (isAvi) {
-        // Direct server-side OpenCV replay for .avi and container formats
-        await window.edgeVision.startServerVideoReplay(file, 'videoFeed', 'serverFrameFeed', 'overlayCanvas');
-      } else {
-        // Try browser-native first, gracefully falling back to server replay if browser codec fails
-        await window.edgeVision.startVideoReplay(file, 'videoFeed', 'serverFrameFeed', 'overlayCanvas');
-      }
-    } catch (err) {
-      alert("Video replay error: " + err.message);
+// All server-derived text is rendered as text, never as HTML.
+function text(id, value) { document.getElementById(id).textContent = value; }
+function node(tag, className, value) { const el = document.createElement(tag); el.className = className; if (value !== undefined) el.textContent = value; return el; }
+const recentStates = new Map();
+let recentEvents = [];
+window.updateDashboard = data => {
+  const poses = data.poses || [], s1 = data.stage1_presence, s3 = data.stage3_event;
+  const fallAlert = s3.fall_alert_active ?? s3.fall_confirmed;
+  for (const category of ['Standing','Sitting','Fall']) text(category.toLowerCase()+'Count',category==='Fall' && fallAlert ? Math.max(1,poses.filter(p=>p.category===category).length) : poses.filter(p=>p.category===category).length);
+  text('inferenceMetric', `${Math.round(data.inference_ms)} ms`);
+  text('modelMetric', `${data.model || 'Pose model'} · ${data.device || 'Local'}`);
+  text('trackedMetric', poses.length); text('presenceBadge', poses.length ? 'Detected' : 'Idle');
+  text('movementMetric',s1.movement_status || '—'); text('fluxMetric',`${s1.motion_flux_pct || 0}%`);
+  text('fallState',fallAlert ? (s3.fall_detection_level==='possible_partial' ? 'Possible / partial fall' : 'Fall detected') : s3.state==='VERIFYING' ? 'Checking motion' : 'Monitoring');
+  text('descentMetric',`${s3.normalized_drop_speed || 0} torso lengths/s`);
+  text('dwellMetric',`${s3.ground_dwell_sec || 0} s`);
+  document.getElementById('fallBanner').hidden = !fallAlert;
+  text('fallBannerDetail',s3.fall_detection_level==='possible_partial' ? 'Possible / partial fall after sudden motion from standing or sitting. Alert stays visible for 10 seconds.' : 'Sustained collapse confirmed by the pose checks. Check the person.');
+  const cards = document.getElementById('personCards'); cards.replaceChildren();
+  if (!poses.length) cards.append(node('p','muted','Waiting for visible body keypoints.'));
+  for (const p of poses) {
+    const card = node('div','person-card');
+    const heading = node('div','person-heading'); heading.append(node('strong','',`Person ${p.track_id}`),node('span',`activity-tag ${p.category.toLowerCase()}`,p.posture));
+    card.append(heading,node('p','person-reason',p.reason));
+    const f = p.features || {};
+    const rows = [['Visible joints',`${f.visible_keypoints || 0} / 17`],['Torso tilt',f.torso_angle == null ? 'Unavailable' : `${f.torso_angle}°`],['Knee angle',f.knee_angle == null ? 'Not visible' : `${f.knee_angle}°`],['Evidence',p.provisional ? 'Limited · provisional' : 'Observed geometry']];
+    for (const [label,value] of rows) { const row=node('div','metric-row'); row.append(node('span','',label),node('strong','',value)); card.append(row); }
+    cards.append(card);
+    if (recentStates.get(p.track_id)!==p.posture) {
+      recentEvents.unshift({time:new Date().toLocaleTimeString(),person:p.track_id,label:p.posture,limited:p.provisional});
+      recentEvents=recentEvents.slice(0,5); recentStates.set(p.track_id,p.posture);
     }
   }
-}
-
-function stopWebcam() {
-  if (window.edgeVision) {
-    window.edgeVision.stopCamera();
-  }
-}
-
-window.toggleViewFitMode = function() {
-  const video = document.getElementById('videoFeed');
-  const img = document.getElementById('serverFrameFeed');
-  const btn = document.getElementById('viewToggleBtn');
-  const currentFit = (video && video.style.objectFit) || 'contain';
-  const newFit = currentFit === 'contain' ? 'cover' : 'contain';
-  if (video) video.style.objectFit = newFit;
-  if (img) img.style.objectFit = newFit;
-  if (btn) btn.innerHTML = newFit === 'contain' ? '⛶ Full View' : '⛶ Fill Crop';
+  const events = document.getElementById('sessionEvents');
+  if (recentEvents.length) { events.replaceChildren(); for (const e of recentEvents) { const row=node('div','session-event'); row.append(node('time','',e.time),node('strong','',`Person ${e.person}`),node('span','',e.label+(e.limited?' · limited view':''))); events.append(row); } }
 };
-
-// Initial start on unified pipeline and load SQLite alerts
-pipelineView();
-loadPersistedAlerts();
+window.resetDashboard = () => {
+  recentStates.clear(); recentEvents=[];
+  window.updateDashboard({poses:[],inference_ms:0,stage1_presence:{},stage3_event:{}});
+  text('inferenceMetric','—'); text('sessionEvents','Activity changes will appear here.');
+};
+async function getJSON(url,options) { const r=await fetch(url,options); if(!r.ok) throw new Error(`Request failed (${r.status})`); return r.json(); }
+async function loadHistory() {
+  const list=document.getElementById('historyList'); text('historyList','Loading records…');
+  try {
+    const data=await getJSON('/api/alerts?limit=50'); list.replaceChildren();
+    if(!data.alerts?.length) { list.append(node('p','muted','No activity records yet. Start the camera to begin.')); return; }
+    for(const event of data.alerts) {
+      const row=node('article','history-row');
+      const content=node('div',''); content.append(node('strong','',`${event.type} · ${event.track_id}`),node('p','',event.details),node('small','muted',`${event.full_timestamp} · ${event.metadata?.classifier_version || 'Previous pipeline'}`)); row.append(content);
+      if(event.severity!=='NORMAL'&&!event.acknowledged) { const btn=node('button','light-button','Acknowledge'); btn.onclick=async()=>{ try {await getJSON(`/api/alerts/${encodeURIComponent(event.alert_id)}/acknowledge`,{method:'POST'}); await loadHistory();} catch(e){btn.textContent='Retry acknowledgement';} }; row.append(btn); }
+      else row.append(node('span','pill',event.acknowledged?'Acknowledged':event.severity));
+      list.append(row);
+    }
+  } catch(e){text('historyList',e.message);}
+}
+async function loadMemory(query='') {
+  const list=document.getElementById('memoryList'); text('memoryList','Loading memories…');
+  try {
+    const data=query ? await getJSON('/api/query_memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query})}) : await getJSON('/api/chroma_memories');
+    list.replaceChildren(); const memories=data.memories || data.matches || [];
+    if(!memories.length) list.append(node('p','muted','No stored memories found.'));
+    for(const m of memories) { const card=node('article','memory-card'); card.append(node('p','',m.document || m.text || ''),node('small','muted',m.id || m.metadata?.source || 'Stored memory')); list.append(card); }
+  } catch(e){text('memoryList',e.message);}
+}
+async function loadBenchmark() {
+  try {
+    const {benchmark:b}=await getJSON('/api/benchmark'); const container=document.getElementById('benchmarkContent'); container.replaceChildren();
+    if(!b) {container.append(node('p','muted','No saved benchmark.'));return;}
+    container.append(node('h3','',b.dataset_name),node('p','muted',b.dataset_description));
+    for(const [label,value] of [['Frames evaluated',b.total_frames_evaluated],['Event precision',`${b.event_level_precision_pct}%`],['Event recall',`${b.event_level_recall_pct}%`],['Average inference',`${b.avg_inference_latency_ms} ms`],['P95 latency',`${b.p95_tail_latency_ms} ms`]]) {const row=node('div','metric-row');row.append(node('span','',label),node('strong','',value));container.append(row);}
+  } catch(e){text('benchmarkContent',e.message);}
+}
+const pageTitles={live:['Live detection pipeline','Person tracking, body keypoints and activity recognition.'],history:['Activity & alerts','Review and acknowledge recorded events.'],memory:['ChromaDB memory','Existing semantic memories and context.'],benchmark:['Measured benchmark','Saved evaluation results and their scope.']};
+document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>{
+  const page=button.dataset.page;
+  document.querySelectorAll('.page-panel').forEach(panel=>panel.hidden=panel.id!==page+'Page');
+  document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b===button));
+  text('pageHeading',pageTitles[page][0]);text('pageSubtitle',pageTitles[page][1]);
+  if(page==='history')loadHistory();if(page==='memory')loadMemory();if(page==='benchmark')loadBenchmark();
+}));
+document.getElementById('refreshHistory').onclick=loadHistory;
+document.getElementById('memoryForm').onsubmit=e=>{e.preventDefault();loadMemory(document.getElementById('memoryQuery').value.trim());};
+getJSON('/api/health').then(h=>{text('systemStatus',`Pose engine online · ${h.hardware.yolo_device}`);text('modelMetric',h.components.pose_estimator.model);}).catch(()=>text('systemStatus','Server unavailable'));

@@ -1,676 +1,193 @@
-/**
- * CareWatch Live Stream & Unified Edge AI Pipeline Client
- * Stages:
- * 1. Person Presence & Genuine Motion Flux (YOLOv8n + Frame Diff)
- * 2. Biomechanical Posture Estimation (YOLO11n-Pose: Standing, Sitting, Lying/Resting)
- * 3. Temporal Fall Event State Machine (Drop Velocity -> Verification -> Fall Confirmed)
- * 4. Real-time Alert Dispatch & Audit Trail
- */
-
+// One transform for video and landmarks, including letterboxing and webcam mirroring.
 class EdgeVisionClient {
   constructor() {
-    this.stream = null;
-    this.ws = null;
-    this.mode = 'pipeline'; // 'pipeline', 'motion', or 'har'
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d');
-    this.videoEl = null;
-    this.overlayCanvas = null;
-    this.overlayCtx = null;
-    this.isStreaming = false;
-    this.waitingForResponse = false;
-    this.lastFrameTime = 0;
-    this.smoothedKpts = null;
-    this.sentFrameWidth = 480;
-    this.sentFrameHeight = 360;
-    
-    // 17-Keypoint COCO pairs for full-body & facial landmark tracking
-    this.SKELETON_PAIRS = [
-      // Facial & Head landmarks (Nose, Eyes, Ears)
-      [0, 1], [0, 2], [1, 3], [2, 4],
-      // Torso & Shoulders
-      [5, 6], [5, 11], [6, 12], [11, 12],
-      // Arms (Shoulder -> Elbow -> Wrist)
-      [5, 7], [7, 9], [6, 8], [8, 10],
-      // Legs (Hip -> Knee -> Ankle)
-      [11, 13], [13, 15], [12, 14], [14, 16]
-    ];
+    this.video = document.getElementById('videoFeed');
+    this.image = document.getElementById('serverFrameFeed');
+    this.overlay = document.getElementById('overlayCanvas');
+    this.ctx = this.overlay.getContext('2d');
+    this.capture = document.createElement('canvas');
+    this.captureCtx = this.capture.getContext('2d');
+    this.generation = 0;
+    this.running = false;
+    this.poses = [];
+    this.pairs = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
+    new ResizeObserver(() => this.drawOverlay()).observe(this.overlay.parentElement);
   }
-
-  setMode(mode) {
-    if (this.mode !== mode) {
-      this.mode = mode;
-      console.log(`[EdgeVisionClient] Mode changed to ${mode}`);
-      if (this.isStreaming) {
-        this.closeWebSocket();
-        this.connectWebSocket();
-      }
-    }
+  setStatus(text) { document.getElementById('cameraStatus').textContent = text; }
+  setAlertAppearance(active) {
+    document.body.classList.toggle('fall-alert-active', Boolean(active));
+    document.getElementById('cameraView').classList.toggle('fall-alert-active', Boolean(active));
   }
-
-  attachToDOMElements(videoElementId, overlayCanvasId) {
-    this.videoEl = document.getElementById(videoElementId);
-    this.overlayCanvas = document.getElementById(overlayCanvasId);
-    if (this.overlayCanvas) {
-      this.overlayCtx = this.overlayCanvas.getContext('2d');
-    }
-    if (this.videoEl && this.stream) {
-      this.videoEl.srcObject = this.stream;
-      this.videoEl.play().catch(e => console.warn(e));
-    }
+  async startCamera() {
+    this.stop();
+    const token = this.generation;
+    this.setStatus('Opening camera…');
+    const stream = await navigator.mediaDevices.getUserMedia({video: {width: {ideal: 1280}, height: {ideal: 720}}, audio: false});
+    if (token !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
+    this.stream = stream;
+    this.video.srcObject = stream;
+    this.mirrored = true;
+    this.video.classList.add('mirrored');
+    await this.video.play();
+    if (token !== this.generation) return;
+    this.connect('/ws/pipeline');
   }
-
-  async startCamera(videoElementId, overlayCanvasId) {
-    this.videoEl = document.getElementById(videoElementId);
-    this.overlayCanvas = document.getElementById(overlayCanvasId);
-    if (this.overlayCanvas) {
-      this.overlayCtx = this.overlayCanvas.getContext('2d');
-      this.overlayCanvas.classList.remove('no-mirror');
-    }
-
-    if (!this.stream) {
-      try {
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            frameRate: { ideal: 30 }
-          },
-          audio: false
-        });
-      } catch (err) {
-        throw new Error("Camera permission denied or camera not found: " + err.message);
-      }
-    }
-
-    if (this.videoEl) {
-      this.videoEl.srcObject = this.stream;
-      await this.videoEl.play();
-    }
-
-    this.isStreaming = true;
-    this.connectWebSocket();
-  }
-
-  async startVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId) {
-    this.videoEl = document.getElementById(videoElementId);
-    this.serverFrameEl = document.getElementById(serverFrameId);
-    this.overlayCanvas = document.getElementById(overlayCanvasId);
-    if (this.overlayCanvas) {
-      this.overlayCtx = this.overlayCanvas.getContext('2d');
-    }
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(t => t.stop());
-      this.stream = null;
-    }
-
-    if (this.serverFrameEl) {
-      this.serverFrameEl.style.display = 'none';
-      this.serverFrameEl.src = '';
-    }
-
-    if (this.videoEl) {
-      this.videoEl.style.display = 'block';
-      this.videoEl.srcObject = null;
-      this.videoEl.src = URL.createObjectURL(file);
-      this.videoEl.loop = true;
-      this.videoEl.muted = true;
-      
-      this.videoEl.onerror = async () => {
-        console.warn("[EdgeVisionClient] Browser cannot decode video, falling back to server-side OpenCV replay:", file.name);
-        await this.startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId);
-      };
-
-      try {
-        await this.videoEl.play();
-      } catch (e) {
-        console.warn("[EdgeVisionClient] Browser playback error, falling back to server-side OpenCV replay:", e);
-        await this.startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId);
-        return;
-      }
-    }
-
-    this.isStreaming = true;
-    this.connectWebSocket();
-
-    const statusBadge = document.getElementById('camStatusBadge');
-    if (statusBadge) {
-      statusBadge.innerText = '● REPLAY SIMULATION · RTX 3050 CUDA';
-      statusBadge.className = 'chip chip-sage';
+  async startReplay(file) {
+    this.stop();
+    const token = this.generation;
+    this.setStatus('Opening video…');
+    this.objectURL = URL.createObjectURL(file);
+    this.video.src = this.objectURL;
+    this.video.loop = true;
+    try {
+      await this.video.play();
+      if (token !== this.generation) return;
+      this.connect('/ws/pipeline');
+    } catch {
+      if (token !== this.generation) return;
+      this.video.pause();
+      this.video.hidden = true;
+      this.image.hidden = false;
+      this.setStatus('Preparing video…');
+      const body = new FormData();
+      body.append('file', file);
+      const response = await fetch('/api/upload_video', {method: 'POST', body});
+      const data = await response.json();
+      if (token !== this.generation) return;
+      if (!response.ok || data.status !== 'success') throw new Error(data.message || 'Could not open this video.');
+      this.serverReplay = true;
+      this.connect(`/ws/replay_stream?video=${encodeURIComponent(data.filename)}`);
     }
   }
-
-  async startServerVideoReplay(file, videoElementId, serverFrameId, overlayCanvasId) {
-    this.videoEl = document.getElementById(videoElementId);
-    this.serverFrameEl = document.getElementById(serverFrameId);
-    this.overlayCanvas = document.getElementById(overlayCanvasId);
-    if (this.overlayCanvas) {
-      this.overlayCtx = this.overlayCanvas.getContext('2d');
-      this.overlayCanvas.classList.add('no-mirror');
-    }
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(t => t.stop());
-      this.stream = null;
-    }
-
-    if (this.videoEl) {
-      this.videoEl.pause();
-      this.videoEl.style.display = 'none';
-    }
-
-    if (this.serverFrameEl) {
-      this.serverFrameEl.style.display = 'block';
-    }
-
-    const statusBadge = document.getElementById('camStatusBadge');
-    if (statusBadge) {
-      statusBadge.innerText = `● UPLOADING ${file.name.toUpperCase()}...`;
-      statusBadge.className = 'chip chip-amber';
-    }
-
-    // 1. Upload to backend
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/upload_video', {
-      method: 'POST',
-      body: formData
-    });
-    const uploadData = await res.json();
-    if (uploadData.status !== 'success') {
-      throw new Error(uploadData.message || 'Failed to upload video');
-    }
-
-    // 2. Connect to WebSocket replay stream
-    this.closeWebSocket();
-    this.isStreaming = true;
-    this.isServerReplay = true;
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/ws/replay_stream?video=${encodeURIComponent(uploadData.filename)}`;
-    console.log(`[EdgeVisionClient] Connecting server video replay -> ${wsUrl}`);
-    
-    this.ws = new WebSocket(wsUrl);
-
-    this.ws.onopen = () => {
-      console.log(`[EdgeVisionClient] Replay stream connected for ${uploadData.filename}`);
-      if (statusBadge) {
-        statusBadge.innerText = `● REPLAY (${uploadData.format.toUpperCase()} · ${uploadData.resolution}) · RTX 3050 CUDA`;
-        statusBadge.className = 'chip chip-sage';
-      }
+  connect(endpoint) {
+    const token = this.generation;
+    this.running = true;
+    this.setStatus('Connecting…');
+    document.getElementById('stopButton').disabled = false;
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${endpoint}`);
+    this.ws = ws;
+    ws.onopen = () => {
+      if (token !== this.generation) return;
+      this.setStatus(this.stream ? 'Camera live' : 'Video replay');
+      document.getElementById('cameraView').classList.add('is-live');
+      document.getElementById('emptyState').hidden = true;
+      document.getElementById('activityLabel').textContent = 'Looking for a person…';
+      if (!this.serverReplay) this.sendFrame();
     };
-
-    this.ws.onmessage = (event) => {
+    ws.onmessage = async event => {
+      if (token !== this.generation) return;
+      clearTimeout(this.responseTimer);
       try {
         const data = JSON.parse(event.data);
-        if (data.error) {
-          console.error("Replay error:", data.error);
-          return;
+        if (data.error) throw new Error(data.error);
+        if (data.rendered_frame) {
+          this.image.src = data.rendered_frame;
+          await this.image.decode();
+          if (token !== this.generation) return;
         }
-
-        // Render frame directly onto serverFrameEl
-        if (data.rendered_frame && this.serverFrameEl) {
-          this.serverFrameEl.src = data.rendered_frame;
-        }
-
-        // Handle pipeline output
-        this.handlePipelineResult(data);
-
-        // Draw skeleton onto overlay canvas
-        if (this.overlayCanvas && this.serverFrameEl) {
-          const w = this.serverFrameEl.clientWidth || 480;
-          const h = this.serverFrameEl.clientHeight || 360;
-          if (w > 0 && h > 0) {
-            this.overlayCanvas.width = w;
-            this.overlayCanvas.height = h;
-            this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
-
-            const sx = this.overlayCanvas.width / 480.0;
-            const sy = this.overlayCanvas.height / 360.0;
-
-            const s2 = data.stage2_posture;
-            if (s2 && s2.keypoints && s2.keypoints.length > 0) {
-              const kpts = s2.keypoints;
-              const theme = s2.category === 'Lying' ? '#b5179e' : '#00f5d4';
-              this.overlayCtx.lineCap = 'round';
-              this.overlayCtx.lineJoin = 'round';
-
-              for (const [p1, p2] of this.SKELETON_PAIRS) {
-                const pt1 = kpts[p1];
-                const pt2 = kpts[p2];
-                if (pt1 && pt2 && pt1[2] > 0.20 && pt2[2] > 0.20) {
-                  const isHead = (p1 < 5 || p2 < 5);
-                  this.overlayCtx.lineWidth = isHead ? 2.2 : 3.5;
-                  this.overlayCtx.strokeStyle = isHead ? '#ffd166' : theme;
-                  this.overlayCtx.beginPath();
-                  this.overlayCtx.moveTo(pt1[0] * sx, pt1[1] * sy);
-                  this.overlayCtx.lineTo(pt2[0] * sx, pt2[1] * sy);
-                  this.overlayCtx.stroke();
-                }
-              }
-
-              kpts.forEach((pt, idx) => {
-                if (pt[2] > 0.20) {
-                  const jx = pt[0] * sx;
-                  const jy = pt[1] * sy;
-                  const isHead = idx < 5;
-                  const radius = isHead ? 3.5 : 4.8;
-                  this.overlayCtx.beginPath();
-                  this.overlayCtx.arc(jx, jy, radius, 0, 2 * Math.PI);
-                  this.overlayCtx.fillStyle = isHead ? '#ffd166' : theme;
-                  this.overlayCtx.fill();
-                  this.overlayCtx.beginPath();
-                  this.overlayCtx.arc(jx, jy, radius * 0.45, 0, 2 * Math.PI);
-                  this.overlayCtx.fillStyle = '#ffffff';
-                  this.overlayCtx.fill();
-                }
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Replay message parse error:", err);
-      }
+        this.handleResult(data);
+        if (!this.serverReplay) this.frameTimer = setTimeout(() => this.sendFrame(), 35);
+      } catch (error) { if (token === this.generation) this.fail(error.message); }
     };
-
-    this.ws.onerror = (err) => {
-      console.error("[EdgeVisionClient] Replay WS error:", err);
-    };
-
-    this.ws.onclose = () => {
-      console.log("[EdgeVisionClient] Replay WS closed");
-    };
+    ws.onerror = () => { if (token === this.generation) this.fail('Cannot connect to the detection server. Try Start camera again.'); };
+    ws.onclose = () => { if (token === this.generation && this.running) this.fail('Connection lost. Start the camera again to reconnect.'); };
+    this.responseTimer = setTimeout(() => this.fail('The detection server did not respond. Try again.'), 20000);
   }
-
-  stopCamera() {
-    this.isStreaming = false;
-    this.isServerReplay = false;
-    this.waitingForResponse = false;
-    this.closeWebSocket();
-
-    if (this.stream) {
-      this.stream.getTracks().forEach(t => t.stop());
-      this.stream = null;
-    }
-
-    if (this.videoEl) {
-      this.videoEl.pause();
-      this.videoEl.srcObject = null;
-      this.videoEl.removeAttribute('src');
-      this.videoEl.style.display = 'block';
-    }
-
-    if (this.serverFrameEl) {
-      this.serverFrameEl.src = '';
-      this.serverFrameEl.style.display = 'none';
-    }
-
-    if (this.overlayCtx && this.overlayCanvas) {
-      this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
-    }
-
-    const statusBadge = document.getElementById('camStatusBadge');
-    if (statusBadge) {
-      statusBadge.innerText = 'STREAM OFFLINE';
-      statusBadge.style.color = '#7a847f';
-    }
+  sendFrame() {
+    if (!this.running || this.ws?.readyState !== WebSocket.OPEN) return;
+    if (this.video.readyState < 2) { this.frameTimer = setTimeout(() => this.sendFrame(), 50); return; }
+    this.frameWidth = Math.min(960, this.video.videoWidth);
+    this.frameHeight = Math.max(1, Math.round(this.frameWidth * this.video.videoHeight / this.video.videoWidth));
+    this.capture.width = this.frameWidth;
+    this.capture.height = this.frameHeight;
+    this.captureCtx.drawImage(this.video, 0, 0, this.frameWidth, this.frameHeight);
+    this.ws.send(JSON.stringify({frame: this.capture.toDataURL('image/jpeg', .85), timestamp: this.stream ? null : this.video.currentTime}));
+    clearTimeout(this.responseTimer);
+    this.responseTimer = setTimeout(() => this.fail('Detection timed out. Start the camera again to reconnect.'), 20000);
   }
-
-  connectWebSocket() {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let endpoint = '/ws/pipeline';
-    if (this.mode === 'motion') endpoint = '/ws/motion';
-    else if (this.mode === 'har') endpoint = '/ws/har';
-
-    const wsUrl = `${protocol}//${location.host}${endpoint}`;
-
-    console.log(`[EdgeVisionClient] Connecting WebSocket -> ${wsUrl}`);
-    this.ws = new WebSocket(wsUrl);
-
-    this.ws.onopen = () => {
-      console.log(`[EdgeVisionClient] Connected to ${endpoint}`);
-      const statusBadge = document.getElementById('camStatusBadge');
-      if (statusBadge) {
-        statusBadge.innerText = 'STREAM LIVE · RTX 3050 CUDA';
-        statusBadge.style.color = '#5f806b';
-      }
-      this.waitingForResponse = false;
-      this.sendCurrentFrame();
-    };
-
-    this.ws.onmessage = (event) => {
-      this.waitingForResponse = false;
-      try {
-        const data = JSON.parse(event.data);
-        if (this.mode === 'pipeline') {
-          this.handlePipelineResult(data);
-        } else if (this.mode === 'motion') {
-          this.handleMotionResult(data);
-        } else {
-          this.handleHARResult(data);
-        }
-      } catch (e) {
-        console.error("[EdgeVisionClient] Error parsing message", e);
-      }
-
-      this.requestNextFrame();
-    };
-
-    this.ws.onerror = (err) => {
-      console.error("[EdgeVisionClient] WS Error", err);
-      this.waitingForResponse = false;
-    };
-
-    this.ws.onclose = () => {
-      console.log("[EdgeVisionClient] WS Disconnected");
-      this.waitingForResponse = false;
-    };
+  handleResult(data) {
+    const presence = data.stage1_presence;
+    const pose = data.stage2_posture;
+    this.frameWidth = data.frame_width || this.frameWidth;
+    this.frameHeight = data.frame_height || this.frameHeight;
+    this.poses = data.poses || (pose.keypoints?.length ? [{keypoints: pose.keypoints, posture: pose.posture, box: pose.box}] : []);
+    const fallAlert = data.stage3_event?.fall_alert_active ?? data.stage3_event?.fall_confirmed;
+    this.setAlertAppearance(fallAlert);
+    const activity = fallAlert ? 'Fall detected' : (!presence.person_present ? 'No person detected' : pose.posture);
+    document.getElementById('activityLabel').textContent = activity;
+    document.getElementById('personCount').textContent = presence.person_present ? `${presence.persons_count} ${presence.persons_count === 1 ? 'person' : 'people'} detected` : 'No person detected';
+    document.getElementById('latencyLabel').textContent = `${Math.round(data.inference_ms)} ms`;
+    document.getElementById('activityHint').textContent = fallAlert
+      ? (data.stage3_event.fall_detection_level === 'possible_partial' ? 'Possible / partial fall after sudden motion. Check the person.' : 'Fall alert active. Check the person.')
+      : (!presence.person_present ? 'Step into the camera view to begin.' : pose.details);
+    window.updateDashboard?.(data);
+    this.drawOverlay();
   }
-
-  closeWebSocket() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  requestNextFrame() {
-    if (!this.isStreaming) return;
-    const now = performance.now();
-    const elapsed = now - this.lastFrameTime;
-    const minDelay = 40; // ~25 FPS smooth live detection on GPU
-
-    if (elapsed < minDelay) {
-      setTimeout(() => this.sendCurrentFrame(), minDelay - elapsed);
-    } else {
-      requestAnimationFrame(() => this.sendCurrentFrame());
-    }
-  }
-
-  sendCurrentFrame() {
-    if (!this.isStreaming || this.waitingForResponse) return;
-    if (!this.videoEl || this.videoEl.readyState < 2) {
-      setTimeout(() => this.sendCurrentFrame(), 50);
-      return;
-    }
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    const vw = this.videoEl.videoWidth || 640;
-    const vh = this.videoEl.videoHeight || 480;
-    const targetW = 480;
-    const targetH = Math.max(240, Math.round(targetW * (vh / vw)));
-
-    this.canvas.width = targetW;
-    this.canvas.height = targetH;
-    this.ctx.drawImage(this.videoEl, 0, 0, targetW, targetH);
-    const b64 = this.canvas.toDataURL('image/jpeg', 0.60);
-
-    this.sentFrameWidth = targetW;
-    this.sentFrameHeight = targetH;
-    this.waitingForResponse = true;
-    this.lastFrameTime = performance.now();
-    this.ws.send(b64);
-  }
-
-  // ----------------- UNIFIED 1-PAGE PIPELINE HANDLER -----------------
-  handlePipelineResult(data) {
-    const s1 = data.stage1_presence;
-    const s2 = data.stage2_posture;
-    const s3 = data.stage3_event;
-
-    // 1. Metric Strip Updates
-    const mLatency = document.getElementById('mLatency');
-    const mPresence = document.getElementById('mPresence');
-    const mPosture = document.getElementById('mPosture');
-    const mState = document.getElementById('mState');
-
-    if (mLatency) mLatency.innerText = `${data.inference_ms} ms`;
-    if (mPresence) mPresence.innerText = s1.person_present ? `Present (${s1.persons_count})` : 'Idle';
-    if (mPosture) mPosture.innerText = s2.posture || 'Idle';
-    if (mState) mState.innerText = s3.state;
-
-    // 2. Stage 1: Person Presence & Movement Gate Card
-    const pPresenceText = document.getElementById('pPresenceText');
-    const pPresenceBadge = document.getElementById('pPresenceBadge');
-    const pMotionFlux = document.getElementById('pMotionFlux');
-    const pMotionFluxBar = document.getElementById('pMotionFluxBar');
-    const pMotionActivity = document.getElementById('pMotionActivity');
-
-    if (pPresenceText) pPresenceText.innerText = s1.status_text;
-    if (pPresenceBadge) {
-      pPresenceBadge.className = s1.person_present ? 'badge stable' : 'badge';
-      pPresenceBadge.innerText = s1.person_present ? 'Person Detected' : 'Scene Idle';
-    }
-    if (pMotionFlux) pMotionFlux.innerText = `${s1.motion_flux_pct}%`;
-    if (pMotionFluxBar) pMotionFluxBar.style.width = `${Math.min(100, s1.motion_flux_pct * 4)}%`;
-    if (pMotionActivity) {
-      pMotionActivity.innerText = s1.motion_active ? 'Active Movement' : 'Stationary Presence';
-      pMotionActivity.style.color = s1.motion_active ? 'var(--amber)' : 'var(--sage)';
-    }
-
-    // 3. Stage 2: Biomechanical Posture Recognition Card
-    const pPostureText = document.getElementById('pPostureText');
-    const pPostureBadge = document.getElementById('pPostureBadge');
-    const pTorsoAngle = document.getElementById('pTorsoAngle');
-    const pAspectRatio = document.getElementById('pAspectRatio');
-    const pPostureDetail = document.getElementById('pPostureDetail');
-
-    if (pPostureText) pPostureText.innerText = s2.posture;
-    if (pTorsoAngle) pTorsoAngle.innerText = `${s2.torso_angle_deg}°`;
-    if (pAspectRatio) pAspectRatio.innerText = `${s2.aspect_ratio}`;
-    if (pPostureDetail) pPostureDetail.innerText = s2.details;
-
-    if (pPostureBadge) {
-      if (s2.category === 'Standing') {
-        pPostureBadge.className = 'badge stable';
-        pPostureBadge.innerText = 'Standing (Upright)';
-      } else if (s2.category === 'Sitting') {
-        pPostureBadge.className = 'badge monitor';
-        pPostureBadge.innerText = s2.posture.includes('Leaning') ? 'Sitting (Leaning)' : 'Sitting (Seated)';
-      } else if (s2.category === 'Lying') {
-        pPostureBadge.className = 'badge';
-        pPostureBadge.style.background = '#ebe4f4';
-        pPostureBadge.style.color = '#6b3ea3';
-        pPostureBadge.innerText = 'Lying / Resting';
-      } else {
-        pPostureBadge.className = 'badge';
-        pPostureBadge.innerText = s2.posture;
+  drawOverlay() {
+    const width = this.overlay.clientWidth, height = this.overlay.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    this.overlay.width = Math.round(width * dpr);
+    this.overlay.height = Math.round(height * dpr);
+    const ctx = this.ctx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!this.frameWidth || !this.frameHeight || !this.running) return;
+    const scale = Math.min(width / this.frameWidth, height / this.frameHeight);
+    const ox = (width - this.frameWidth * scale) / 2, oy = (height - this.frameHeight * scale) / 2;
+    const point = pt => [ox + (this.mirrored ? this.frameWidth - pt[0] : pt[0]) * scale, oy + pt[1] * scale];
+    const visible = pt => pt && pt[2] >= .35 && pt[0] > 1 && pt[1] > 1 && pt[0] < this.frameWidth - 1 && pt[1] < this.frameHeight - 1;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const pose of this.poses) {
+      const points = pose.keypoints;
+      for (const [a,b] of this.pairs) {
+        if (!visible(points[a]) || !visible(points[b])) continue;
+        ctx.beginPath(); ctx.moveTo(...point(points[a])); ctx.lineTo(...point(points[b]));
+        ctx.lineWidth = 6; ctx.strokeStyle = '#071a13b0'; ctx.stroke();
+        ctx.lineWidth = 3; ctx.strokeStyle = a < 5 ? '#ffe08a' : '#63ffd0'; ctx.stroke();
       }
-    }
-
-    // 4. Stage 3: Temporal Fall Event State Machine Card
-    const pStateText = document.getElementById('pStateText');
-    const pStateBadge = document.getElementById('pStateBadge');
-    const pDropVelocity = document.getElementById('pDropVelocity');
-    const pGroundDwell = document.getElementById('pGroundDwell');
-    const pipelineAlertBanner = document.getElementById('pipelineAlertBanner');
-
-    if (pStateText) pStateText.innerText = s3.state_label;
-    if (pDropVelocity) pDropVelocity.innerText = `${s3.drop_velocity} px/s`;
-    if (pGroundDwell) pGroundDwell.innerText = `${s3.ground_dwell_sec} s`;
-
-    if (pStateBadge) {
-      if (s3.state === 'FALL_CONFIRMED') {
-        pStateBadge.className = 'badge review';
-        pStateBadge.innerText = 'CRITICAL FALL';
-      } else if (s3.state === 'VERIFYING') {
-        pStateBadge.className = 'badge monitor';
-        pStateBadge.innerText = 'VERIFYING';
-      } else if (s3.state === 'RAPID_DROP') {
-        pStateBadge.className = 'badge monitor';
-        pStateBadge.innerText = 'DROP DETECTED';
-      } else if (s3.state === 'RECOVERED') {
-        pStateBadge.className = 'badge stable';
-        pStateBadge.innerText = 'RECOVERED';
-      } else {
-        pStateBadge.className = 'badge stable';
-        pStateBadge.innerText = 'STABLE';
-      }
-    }
-
-    if (pipelineAlertBanner) {
-      pipelineAlertBanner.style.display = s3.fall_confirmed ? 'flex' : 'none';
-    }
-
-    // 5. Central AI Server: VLM Verification, ChromaDB Memory & Escalation Decision
-    if (data.central_server) {
-      const c = data.central_server;
-      const cDecisionBadge = document.getElementById('cDecisionBadge');
-      const cActionText = document.getElementById('cActionText');
-      const cRationaleText = document.getElementById('cRationaleText');
-      const cVlmObs = document.getElementById('cVlmObs');
-      const cVlmConf = document.getElementById('cVlmConf');
-      const cMemoryDoc = document.getElementById('cMemoryDoc');
-      const cMemoryScore = document.getElementById('cMemoryScore');
-
-      if (cDecisionBadge) {
-        if (c.escalation_decision.includes('EMERGENCY')) {
-          cDecisionBadge.className = 'badge review';
-          cDecisionBadge.innerText = 'EMERGENCY / ALERT';
-        } else if (c.escalation_decision.includes('WARNING')) {
-          cDecisionBadge.className = 'badge monitor';
-          cDecisionBadge.innerText = 'WARNING / REVIEW';
-        } else {
-          cDecisionBadge.className = 'badge stable';
-          cDecisionBadge.innerText = 'NORMAL / LOG';
-        }
-      }
-
-      if (cActionText) cActionText.innerText = c.recommended_action;
-      if (cRationaleText) cRationaleText.innerText = c.agent_rationale;
-      if (cVlmObs) cVlmObs.innerText = c.vlm_verification.scene_observation;
-      if (cVlmConf) cVlmConf.innerText = `${Math.round(c.vlm_verification.confidence * 100)}%`;
-
-      if (c.chroma_memory_matches && c.chroma_memory_matches.length > 0) {
-        const topMatch = c.chroma_memory_matches[0];
-        if (cMemoryDoc) cMemoryDoc.innerText = topMatch.document;
-        if (cMemoryScore) cMemoryScore.innerText = `Similarity: ${(topMatch.similarity_score * 100).toFixed(1)}%`;
-      }
-    }
-
-    // 6. Push to Dynamic Alert Feed
-    if (s3.active_alert && window.recordAlertEvent) {
-      window.recordAlertEvent(s3.active_alert);
-    }
-
-    // 6. Canvas Overlays (Bounding Box + Skeleton with Smoothing & True Aspect Ratio)
-    if (this.overlayCanvas && this.videoEl && this.videoEl.videoWidth > 0) {
-      this.overlayCanvas.width = this.videoEl.videoWidth;
-      this.overlayCanvas.height = this.videoEl.videoHeight;
-      this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
-
-      const sentW = this.sentFrameWidth || 480.0;
-      const sentH = this.sentFrameHeight || (sentW * (this.videoEl.videoHeight / this.videoEl.videoWidth));
-      const sx = this.overlayCanvas.width / sentW;
-      const sy = this.overlayCanvas.height / sentH;
-
-      // Color palette based on posture & risk state
-      let themeColor = '#00f5d4'; // Vivid Emerald Cyan
-      if (s2.category === 'Sitting') themeColor = '#4cc9f0'; // Clean Blue
-      if (s2.category === 'Lying') themeColor = '#b5179e'; // Vivid Purple
-      if (s3.state === 'RAPID_DROP' || s3.state === 'VERIFYING') themeColor = '#ff9f1c'; // Amber Warning
-      if (s3.state === 'FALL_CONFIRMED') themeColor = '#e71d36'; // Red Alert
-
-      // A. Draw Presence Bounding Box
-      s1.boxes.forEach(b => {
-        const bx = b.x1 * sx;
-        const by = b.y1 * sy;
-        const bw = (b.x2 - b.x1) * sx;
-        const bh = (b.y2 - b.y1) * sy;
-
-        this.overlayCtx.lineWidth = 2.0;
-        this.overlayCtx.strokeStyle = themeColor;
-        this.overlayCtx.fillStyle = 'rgba(0, 245, 212, 0.04)';
-        this.overlayCtx.strokeRect(bx, by, bw, bh);
-        this.overlayCtx.fillRect(bx, by, bw, bh);
+      points.forEach((pt, i) => {
+        if (!visible(pt)) return;
+        ctx.beginPath(); ctx.arc(...point(pt), i < 5 ? 4 : 5, 0, 2 * Math.PI);
+        ctx.fillStyle = i < 5 ? '#ffe08a' : '#63ffd0'; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = '#122e24'; ctx.stroke();
       });
-
-      // B. Smooth Keypoint Interpolation (EMA)
-      const rawKpts = s2.keypoints;
-      if (rawKpts && rawKpts.length >= 17) {
-        if (!this.smoothedKpts || this.smoothedKpts.length !== rawKpts.length) {
-          this.smoothedKpts = rawKpts.map(p => [p[0], p[1], p[2]]);
-        } else {
-          const alpha = 0.65; // Highly responsive smoothing
-          for (let i = 0; i < rawKpts.length; i++) {
-            if (rawKpts[i][2] > 0.15) {
-              this.smoothedKpts[i][0] = alpha * rawKpts[i][0] + (1 - alpha) * this.smoothedKpts[i][0];
-              this.smoothedKpts[i][1] = alpha * rawKpts[i][1] + (1 - alpha) * this.smoothedKpts[i][1];
-              this.smoothedKpts[i][2] = rawKpts[i][2];
-            } else {
-              this.smoothedKpts[i][2] *= 0.85;
-            }
-          }
-        }
-
-        const kpts = this.smoothedKpts;
-        this.overlayCtx.lineCap = 'round';
-        this.overlayCtx.lineJoin = 'round';
-
-        // Draw Bones (Skeleton pairs)
-        this.SKELETON_PAIRS.forEach(([i, j]) => {
-          if (kpts[i][2] > 0.20 && kpts[j][2] > 0.20) {
-            const isHead = (i < 5 || j < 5);
-            this.overlayCtx.lineWidth = isHead ? 2.2 : 3.5;
-            this.overlayCtx.strokeStyle = isHead ? '#ffd166' : themeColor;
-            this.overlayCtx.beginPath();
-            this.overlayCtx.moveTo(kpts[i][0] * sx, kpts[i][1] * sy);
-            this.overlayCtx.lineTo(kpts[j][0] * sx, kpts[j][1] * sy);
-            this.overlayCtx.stroke();
-          }
-        });
-
-        // Draw Joints (Dual-ring glowing dots)
-        kpts.forEach((pt, idx) => {
-          if (pt[2] > 0.20) {
-            const jx = pt[0] * sx;
-            const jy = pt[1] * sy;
-            const isHead = (idx < 5);
-            const radius = isHead ? 3.5 : 4.8;
-
-            // Outer ring
-            this.overlayCtx.beginPath();
-            this.overlayCtx.arc(jx, jy, radius, 0, 2 * Math.PI);
-            this.overlayCtx.fillStyle = isHead ? '#ffd166' : themeColor;
-            this.overlayCtx.fill();
-
-            // Inner white core
-            this.overlayCtx.beginPath();
-            this.overlayCtx.arc(jx, jy, radius * 0.45, 0, 2 * Math.PI);
-            this.overlayCtx.fillStyle = '#ffffff';
-            this.overlayCtx.fill();
-          }
-        });
-
-        // Header Badge over subject
-        const headPt = kpts[0];
-        if (headPt && headPt[2] > 0.15) {
-          const hx = headPt[0] * sx;
-          const hy = Math.max(28, (headPt[1] * sy) - 18);
-          this.overlayCtx.save();
-          this.overlayCtx.translate(hx, hy);
-          this.overlayCtx.scale(-1, 1); // Compensates for CSS scaleX(-1) so text reads left-to-right
-          this.overlayCtx.fillStyle = themeColor;
-          this.overlayCtx.font = "600 13px Inter, system-ui, sans-serif";
-          this.overlayCtx.textAlign = "center";
-          this.overlayCtx.fillText(`${s2.posture} · [${s3.state}]`, 0, 0);
-          this.overlayCtx.restore();
-        }
+      if (pose.box) {
+        const [x,y] = point([this.mirrored ? pose.box[2] : pose.box[0], pose.box[1]]);
+        const label = `#${pose.track_id || ''} ${pose.posture || 'Person'}${pose.provisional ? ' · limited view' : ''}`;
+        ctx.font = '600 14px system-ui';
+        const labelWidth = ctx.measureText(label).width + 20;
+        const lx = Math.max(8, Math.min(width - labelWidth - 8, x));
+        const ly = Math.max(100, Math.min(height - 140, y - 34));
+        ctx.fillStyle = pose.category === 'Fall' ? '#7c3025eb' : '#10271ee8'; ctx.fillRect(lx, ly, labelWidth, 28);
+        ctx.fillStyle = '#b8ffe2'; ctx.fillText(label, lx + 10, ly + 19);
       }
     }
   }
-
-  handleMotionResult(data) {
-    // Kept for backward compatibility
+  fail(message) {
+    this.stop();
+    const error = document.getElementById('cameraError');
+    error.textContent = message; error.hidden = false;
   }
-
-  handleHARResult(data) {
-    // Kept for backward compatibility
+  stop() {
+    this.generation++; this.running = false;
+    this.setAlertAppearance(false);
+    window.resetDashboard?.();
+    clearTimeout(this.frameTimer); clearTimeout(this.responseTimer);
+    if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+    if (this.stream) this.stream.getTracks().forEach(track => track.stop());
+    this.stream = null;
+    this.video.pause(); this.video.srcObject = null; this.video.removeAttribute('src'); this.video.load();
+    if (this.objectURL) URL.revokeObjectURL(this.objectURL);
+    this.objectURL = null;
+    this.image.removeAttribute('src'); this.image.hidden = true; this.video.hidden = false;
+    this.video.classList.remove('mirrored');
+    this.mirrored = false; this.serverReplay = false; this.poses = [];
+    this.drawOverlay(); this.setStatus('Camera off');
+    document.getElementById('cameraView').classList.remove('is-live');
+    document.getElementById('emptyState').hidden = false;
+    document.getElementById('stopButton').disabled = true;
+    document.getElementById('activityLabel').textContent = 'Ready when you are';
+    document.getElementById('activityHint').textContent = 'Keep your full body in view for better recognition.';
+    document.getElementById('personCount').textContent = 'No person detected';
+    document.getElementById('latencyLabel').textContent = '';
   }
 }
-
-// Global instance
-window.edgeVision = new EdgeVisionClient();

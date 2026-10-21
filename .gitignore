@@ -29,6 +29,7 @@ ENV/
 *.pt
 !models/yolov8n.pt
 !models/yolo11n-pose.pt
+!models/yolo11s-pose.pt
 *.bin
 *.safetensors
 *.gguf

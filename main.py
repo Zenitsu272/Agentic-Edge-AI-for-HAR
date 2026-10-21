@@ -27,7 +27,11 @@ app = FastAPI(title="CareWatch | Agentic Edge AI Platform for HAR & Fall Detecti
 # Initialize Edge & Central AI components
 pipeline = InferencePipeline()
 chroma_memory = ChromaAgentMemory()
-vlm_adapter = VLMAdapter()
+VLM_ENABLED = os.getenv("CAREWATCH_ENABLE_VLM", "0").lower() in ("1", "true", "yes")
+vlm_adapter = VLMAdapter(auto_load=VLM_ENABLED)
+if not VLM_ENABLED:
+    vlm_adapter.status = "DISABLED"
+    vlm_adapter.status_detail = "Pose-only mode. VLM verification is disabled."
 escalation_policy = EscalationPolicy()
 agent = CareWatchAgent(chroma_memory, vlm_adapter, escalation_policy)
 
@@ -63,7 +67,9 @@ def get_system_health():
     
     # Assess component readiness
     vlm_status = vlm_adapter.status
-    if vlm_status == "ONLINE":
+    if not VLM_ENABLED:
+        vlm_health = "DISABLED"
+    elif vlm_status == "ONLINE":
         vlm_health = "ONLINE"
     elif vlm_status in ["WEIGHTS_INCOMPLETE", "OFFLINE_FALLBACK"]:
         vlm_health = "DEGRADED"
@@ -82,9 +88,9 @@ def get_system_health():
         "status": aggregate_status,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "hardware": {
-            "yolo_device": "CPU",
+            "yolo_device": pipeline.device,
             "vlm_device": getattr(vlm_adapter, "device", "cuda:0"),
-            "gpu_name": "NVIDIA GeForce RTX 3050 6GB Laptop GPU" if torch.cuda.is_available() else "None",
+            "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None",
             "cuda_available": torch.cuda.is_available()
         },
         "components": {
@@ -93,24 +99,24 @@ def get_system_health():
                 "mode": "WEBCAM_AND_VIDEO_REPLAY"
             },
             "person_detector": {
-                "model": "YOLOv8n (Person Presence Gate)",
+                "model": pipeline.model_path.name,
                 "status": "ONLINE",
-                "device": "CPU"
+                "device": pipeline.device
             },
             "pose_estimator": {
-                "model": "YOLO11n-Pose (17 COCO Keypoints)",
+                "model": pipeline.model_path.name,
                 "status": "ONLINE",
-                "device": "CPU"
+                "device": pipeline.device
             },
             "vlm_provider": {
                 "model": vlm_adapter.model_name,
                 "status": vlm_health,
                 "device": getattr(vlm_adapter, "device", "cuda:0"),
                 "detail": vlm_adapter.status_detail,
-                "verification_mode": "VLM_MODEL" if vlm_adapter.status == "ONLINE" else "RULE_BASED_FALLBACK"
+                "verification_mode": "DISABLED" if not VLM_ENABLED else ("VLM_MODEL" if vlm_adapter.status == "ONLINE" else "RULE_BASED_FALLBACK")
             },
             "langgraph_orchestration": {
-                "status": "ONLINE",
+                "status": "ONLINE" if VLM_ENABLED else "DISABLED",
                 "engine": "LangGraph (StateGraph)",
                 "telemetry": coordinator_status
             },
@@ -271,6 +277,7 @@ async def websocket_replay_stream(websocket: WebSocket):
     and streams encoded frames + telemetry to frontend at video FPS.
     """
     await websocket.accept()
+    session_pipeline = pipeline.new_session()
     query_params = websocket.query_params
     video_name = query_params.get("video", "sample_fall_clip.avi")
     
@@ -311,8 +318,10 @@ async def websocket_replay_stream(websocket: WebSocket):
                     break
             except asyncio.TimeoutError:
                 pass
-            except Exception:
-                pass
+            except WebSocketDisconnect:
+                break
+            except (ValueError, RuntimeError):
+                break
 
             if paused:
                 await asyncio.sleep(0.1)
@@ -323,8 +332,7 @@ async def websocket_replay_stream(websocket: WebSocket):
                 # Loop video seamlessly
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 current_frame_pos = 0
-                pipeline.pose_history.clear()
-                pipeline.state = "STABLE"
+                session_pipeline.reset()
                 ret, frame = cap.read()
                 if not ret:
                     break
@@ -333,14 +341,16 @@ async def websocket_replay_stream(websocket: WebSocket):
             replay_timestamp = current_frame_pos / fps
 
             # 1. Edge Inference Pipeline (YOLOv8n + YOLO11n-Pose + FSM)
-            result = pipeline.process_unified(frame, timestamp=replay_timestamp)
+            result = session_pipeline.process_unified(frame, timestamp=replay_timestamp)
             s1 = result["stage1_presence"]
             s2 = result["stage2_posture"]
             s3 = result["stage3_event"]
 
             # 2. Event-driven LangGraph orchestration:
             # Ordinary frames stream through without triggering agent investigation.
-            if agent.coordinator.should_trigger(s3):
+            if not VLM_ENABLED:
+                result["central_server"] = {"status": "DISABLED", "verification_mode": "POSE_ONLY"}
+            elif agent.coordinator.should_trigger(s3):
                 active_alert_id = s3.get("active_alert", {}).get("alert_id") if s3.get("active_alert") else None
                 candidate_id = active_alert_id or f"REPLAY-{s1.get('track_id', 'T1')}-{int(time.time() // 8)}"
                 candidate = {
@@ -355,7 +365,7 @@ async def websocket_replay_stream(websocket: WebSocket):
                         "dwell_sec": s3["ground_dwell_sec"]
                     }
                 }
-                frames_snapshot = list(pipeline.frame_buffer)[-4:] if len(pipeline.frame_buffer) > 0 else [frame]
+                frames_snapshot = list(session_pipeline.frame_buffer)[-4:] if len(session_pipeline.frame_buffer) > 0 else [frame]
                 agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
                 if agent_res:
                     result["central_server"] = {
@@ -419,15 +429,20 @@ async def websocket_pipeline(websocket: WebSocket):
     Edge Device (Stages 1-3) -> Event-Driven LangGraph Orchestrator (VLM + ChromaDB + Escalation Policy) -> Output
     """
     await websocket.accept()
+    session_pipeline = pipeline.new_session()
     try:
         while True:
             data = await websocket.receive_text()
-            frame = pipeline.decode_frame(data)
+            video_time = None
+            if data.startswith('{'):
+                packet = json.loads(data)
+                data = packet['frame']
+                video_time = packet.get('timestamp')
+            frame = session_pipeline.decode_frame(data)
             if frame is None:
+                await websocket.send_json({'error': 'Could not decode video frame'})
                 continue
-            
-            # Edge Stage 1, 2, 3 processing
-            result = pipeline.process_unified(frame)
+            result = session_pipeline.process_unified(frame, timestamp=video_time)
             
             s1 = result["stage1_presence"]
             s2 = result["stage2_posture"]
@@ -435,7 +450,9 @@ async def websocket_pipeline(websocket: WebSocket):
 
             # Event-Driven LangGraph Orchestration:
             # Ordinary frames do NOT trigger agent investigations.
-            if agent.coordinator.should_trigger(s3):
+            if not VLM_ENABLED:
+                result["central_server"] = {"status": "DISABLED", "verification_mode": "POSE_ONLY"}
+            elif agent.coordinator.should_trigger(s3):
                 active_alert_id = s3.get("active_alert", {}).get("alert_id") if s3.get("active_alert") else None
                 candidate_id = active_alert_id or f"LIVE-{s1.get('track_id', 'T1')}-{int(time.time() // 8)}"
                 candidate = {
@@ -451,7 +468,7 @@ async def websocket_pipeline(websocket: WebSocket):
                     }
                 }
 
-                frames_snapshot = list(pipeline.frame_buffer)[-4:] if len(pipeline.frame_buffer) > 0 else [frame]
+                frames_snapshot = list(session_pipeline.frame_buffer)[-4:] if len(session_pipeline.frame_buffer) > 0 else [frame]
                 agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
                 if agent_res:
                     result["central_server"] = {
@@ -488,7 +505,7 @@ async def websocket_pipeline(websocket: WebSocket):
                 }
 
             # Dynamically log verified fall events to ChromaDB persistent memory
-            if s3["fall_confirmed"]:
+            if VLM_ENABLED and s3["fall_confirmed"]:
                 event_uid = s3.get("active_alert", {}).get("alert_id") or f"EVT-LIVE-{int(time.time() // 8)}"
                 if event_uid not in logged_fall_ids:
                     logged_fall_ids.add(event_uid)
@@ -522,13 +539,14 @@ async def websocket_pipeline(websocket: WebSocket):
 @app.websocket("/ws/motion")
 async def websocket_motion(websocket: WebSocket):
     await websocket.accept()
+    session_pipeline = pipeline.new_session()
     try:
         while True:
             data = await websocket.receive_text()
-            frame = pipeline.decode_frame(data)
+            frame = session_pipeline.decode_frame(data)
             if frame is None:
                 continue
-            result = pipeline.process_motion(frame)
+            result = session_pipeline.process_motion(frame)
             await websocket.send_json(result)
     except WebSocketDisconnect:
         pass
@@ -538,13 +556,14 @@ async def websocket_motion(websocket: WebSocket):
 @app.websocket("/ws/har")
 async def websocket_har(websocket: WebSocket):
     await websocket.accept()
+    session_pipeline = pipeline.new_session()
     try:
         while True:
             data = await websocket.receive_text()
-            frame = pipeline.decode_frame(data)
+            frame = session_pipeline.decode_frame(data)
             if frame is None:
                 continue
-            result = pipeline.process_har(frame)
+            result = session_pipeline.process_har(frame)
             await websocket.send_json(result)
     except WebSocketDisconnect:
         pass

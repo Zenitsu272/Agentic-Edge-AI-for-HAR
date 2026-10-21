@@ -93,7 +93,7 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
 
     latencies = []
     events_detected = []
-    posture_counts = {"Standing": 0, "Sitting": 0, "Lying": 0, "Transition": 0, "Partial": 0, "Unknown": 0}
+    posture_counts = {"Standing": 0, "Sitting": 0, "Lying": 0, "Transition": 0, "Partial": 0, "Unknown": 0, "Fall": 0}
     timeline = []
 
     frame_idx = 0
@@ -110,7 +110,7 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
         
         # Run unified pipeline
         t0 = time.time()
-        res = pipeline.process_unified(frame)
+        res = pipeline.process_unified(frame, timestamp=timestamp_sec)
         inf_ms = (time.time() - t0) * 1000.0
         latencies.append(inf_ms)
         
