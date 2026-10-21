@@ -79,7 +79,7 @@ class InferencePipeline:
         motion_active = flux_pct >= 1.2
         return flux_pct, motion_active
 
-    def process_unified(self, frame):
+    def process_unified(self, frame, timestamp=None):
         """
         Single unified edge pipeline:
         Stage 1: Person Presence & Genuine Motion Flux
@@ -87,7 +87,7 @@ class InferencePipeline:
         Stage 3: Temporal Fall Event State Machine (Drop Velocity -> Verification -> Fall Confirmed / Recovered)
         """
         t0 = time.time()
-        now = t0
+        now = timestamp if timestamp is not None else t0
         self.frame_buffer.append(frame)
 
         # --- STAGE 1: PERSON PRESENCE, TRACKING & MOTION ---
@@ -364,31 +364,44 @@ class InferencePipeline:
         drop_velocity = 0.0
         dwell_time = 0.0
 
-        # Calculate downward velocity across recent 0.3s - 0.8s window
+        # Calculate downward velocity across recent 0.20s - 1.0s window
         if len(self.pose_history) >= 4:
             curr = self.pose_history[-1]
-            # Look back ~0.5s ago
-            past_records = [p for p in self.pose_history if 0.25 <= (curr["time"] - p["time"]) <= 0.85]
+            # Look back ~0.20s to 1.0s ago
+            past_records = [p for p in self.pose_history if 0.20 <= (curr["time"] - p["time"]) <= 1.0]
             if past_records:
                 past = past_records[0]
                 dt = max(curr["time"] - past["time"], 0.05)
                 dy = (curr["hip_y"] - past["hip_y"]) if (curr["hip_y"] and past["hip_y"]) else 0.0
                 drop_velocity = dy / dt  # pixels per second (positive = downward drop)
                 
+                # Torso angular change and angular velocity (for backward/forward/lateral falls on bed or furniture)
+                d_angle = (curr["torso_angle"] - past["torso_angle"]) if (curr["torso_angle"] is not None and past["torso_angle"] is not None) else 0.0
+                angular_velocity = abs(d_angle) / dt  # deg/sec
+                
                 # Check for rapid drop transition:
-                # Started upright (Standing or Sitting) -> now Lying, with significant downward velocity
-                is_rapid_drop = (
+                # 1. Floor collapse: Started upright (Standing or Sitting) -> now Lying, with downward hip displacement
+                # 2. Bed/Furniture collapse: Started upright (Standing or Sitting) -> now Lying, with rapid angular collapse
+                is_floor_drop = (
                     past["category"] in ["Standing", "Sitting", "Transition"] and
                     posture_category == "Lying" and
                     dy > 55.0 and
                     drop_velocity > 90.0
                 )
+                is_bed_collapse = (
+                    past["category"] in ["Standing", "Sitting", "Transition"] and
+                    posture_category == "Lying" and
+                    d_angle >= 30.0 and
+                    (angular_velocity >= 30.0 or d_angle >= 40.0)
+                )
+                is_rapid_drop = is_floor_drop or is_bed_collapse
 
                 if self.state == "STABLE" and is_rapid_drop:
                     self.state = "RAPID_DROP"
                     self.drop_detected_time = now
                     self.state_start_time = now
-                    print(f"[TemporalStateMachine] Rapid drop detected! Velocity: {drop_velocity:.1f}px/s, transition: {past['category']} -> {posture_category}")
+                    collapse_type = "Bed/Furniture Collapse" if is_bed_collapse and not is_floor_drop else "Floor Collapse"
+                    print(f"[TemporalStateMachine] Rapid {collapse_type} detected! AngularVel: {angular_velocity:.1f}deg/s, DropVel: {drop_velocity:.1f}px/s, transition: {past['category']} -> {posture_category}")
 
         # STATE MACHINE TRANSITIONS
         if self.state == "RAPID_DROP":

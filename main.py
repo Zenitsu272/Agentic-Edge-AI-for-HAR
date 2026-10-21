@@ -292,6 +292,7 @@ async def websocket_replay_stream(websocket: WebSocket):
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     frame_delay = max(1.0 / min(fps, 30.0), 0.030)
     paused = False
+    current_frame_pos = 0
 
     try:
         while True:
@@ -319,12 +320,18 @@ async def websocket_replay_stream(websocket: WebSocket):
             if not ret:
                 # Loop video seamlessly
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                current_frame_pos = 0
+                pipeline.pose_history.clear()
+                pipeline.state = "STABLE"
                 ret, frame = cap.read()
                 if not ret:
                     break
 
+            current_frame_pos += 1
+            replay_timestamp = current_frame_pos / fps
+
             # 1. Edge Inference Pipeline (YOLOv8n + YOLO11n-Pose + FSM)
-            result = pipeline.process_unified(frame)
+            result = pipeline.process_unified(frame, timestamp=replay_timestamp)
             s1 = result["stage1_presence"]
             s2 = result["stage2_posture"]
             s3 = result["stage3_event"]
