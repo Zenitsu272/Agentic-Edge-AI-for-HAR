@@ -416,6 +416,7 @@ async def websocket_replay_stream(websocket: WebSocket):
                 incident_ids.add(event_id)
                 if event_id not in unverified_incidents:
                     unverified_incidents[event_id] = {'event_id':event_id,'status':verification.get('status','UNAVAILABLE'),
+                        'final_classification':'FALL','decision_source':'POSE_MODEL',
                         'trigger_time_sec':replay_timestamp,'scene_observation':verification.get('scene_observation','VLM verification was unavailable.')}
                 result['video_incident'] = unverified_incidents[event_id]
             result['video_progress'] = {'processed_frames':current_frame_pos,'total_frames':total_frames,

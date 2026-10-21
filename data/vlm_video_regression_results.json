@@ -1,0 +1,147 @@
+{
+  "model": "Qwen2.5-VL-3B-Instruct (4-bit NF4)",
+  "runtime": "Transformers 5.15.1 with local fractional MRoPE fix",
+  "configuration": "Native video, up to 12 frames, 640px max side, 512*28*28 pixel budget per frame; explicit start/end/transition prompt",
+  "limitations": [
+    "This is a four-case regression check, not an accuracy benchmark.",
+    "Descriptions still contain errors (for example, the mattress fall begins standing but the model says sitting).",
+    "Earlier prompt variants missed both falls; another variant falsely labeled an already-lying clip as a fall. Pose remains the final decision source."
+  ],
+  "before": {
+    "mat_fall": "NOT_FALL (5 still images)",
+    "mattress_fall": "NOT_FALL (5 still images)"
+  },
+  "cases": [
+    {
+      "case": "production-mat-fall",
+      "expected": "CONFIRMED_FALL",
+      "result": {
+        "event_id": "production-mat-fall",
+        "status": "CONFIRMED_FALL",
+        "model": "Qwen2.5-VL-3B-Instruct (4-bit NF4)",
+        "trigger_time_sec": 0.5,
+        "verification_scope": "SCENE",
+        "final_classification": "FALL",
+        "decision_source": "POSE_MODEL",
+        "track_id": "Person 1",
+        "is_true_fall": true,
+        "scene_observation": "A person is seen standing and then falling onto a mat. The person lands on their back and remains there.",
+        "evidence_frames_count": 11,
+        "verification_method": "VLM_MODEL",
+        "created_at": 1792606363.5266883,
+        "evidence_offsets_sec": [
+          -0.47,
+          -0.37,
+          -0.27,
+          -0.17,
+          -0.07,
+          0.0,
+          0.1,
+          0.2,
+          0.3,
+          0.4,
+          0.5
+        ],
+        "adapter_status": "ONLINE",
+        "confidence": null,
+        "uncertainty_flag": false,
+        "recovery_observed": false,
+        "duration_ms": 16375,
+        "raw_model_output": "```json\n{\n  \"start_posture\": \"standing\",\n  \"end_posture\": \"lying on a mat\",\n  \"scene_observation\": \"A person is seen standing and then falling onto a mat. The person lands on their back and remains there.\",\n  \"classification\": \"FALL\"\n}\n```",
+        "input_mode": "VIDEO",
+        "input_fps": 10.3448,
+        "evidence_span_sec": 0.9667,
+        "completed_at": 1792606379.9819615
+      }
+    },
+    {
+      "case": "production-mattress-fall",
+      "expected": "CONFIRMED_FALL",
+      "result": {
+        "event_id": "production-mattress-fall",
+        "status": "CONFIRMED_FALL",
+        "model": "Qwen2.5-VL-3B-Instruct (4-bit NF4)",
+        "trigger_time_sec": 0.3,
+        "verification_scope": "SCENE",
+        "final_classification": "FALL",
+        "decision_source": "POSE_MODEL",
+        "track_id": "Person 1",
+        "is_true_fall": true,
+        "scene_observation": "A person is sitting on the floor in a room with green benches and orange cushions. The person then falls backward onto the floor.",
+        "evidence_frames_count": 12,
+        "verification_method": "VLM_MODEL",
+        "created_at": 1792606380.0114462,
+        "evidence_offsets_sec": [
+          -0.27,
+          -0.17,
+          -0.07,
+          0.0,
+          0.1,
+          0.2,
+          0.4,
+          0.5,
+          0.6,
+          0.7,
+          0.8,
+          1.0
+        ],
+        "adapter_status": "ONLINE",
+        "confidence": null,
+        "uncertainty_flag": false,
+        "recovery_observed": false,
+        "duration_ms": 16266,
+        "raw_model_output": "```json\n{\n    \"start_posture\": \"sitting on the floor\",\n    \"end_posture\": \"sitting on the floor\",\n    \"scene_observation\": \"A person is sitting on the floor in a room with green benches and orange cushions. The person then falls backward onto the floor.\",\n    \"classification\": \"FALL\"\n}\n```",
+        "input_mode": "VIDEO",
+        "input_fps": 8.6842,
+        "evidence_span_sec": 1.2667,
+        "completed_at": 1792606396.315523
+      }
+    },
+    {
+      "case": "production-lying",
+      "expected": "NOT_FALL",
+      "result": {
+        "event_id": "production-lying",
+        "model": "Qwen2.5-VL-3B-Instruct (4-bit NF4)",
+        "verification_scope": "SCENE",
+        "adapter_status": "ONLINE",
+        "verification_method": "VLM_MODEL",
+        "status": "NOT_FALL",
+        "is_true_fall": false,
+        "confidence": null,
+        "uncertainty_flag": false,
+        "scene_observation": "The person starts lying on their back on a mat, then sits up while holding their head.",
+        "recovery_observed": false,
+        "evidence_frames_count": 12,
+        "duration_ms": 16578,
+        "raw_model_output": "```json\n{\n  \"start_posture\": \"lying on a mat\",\n  \"end_posture\": \"sitting up\",\n  \"scene_observation\": \"The person starts lying on their back on a mat, then sits up while holding their head.\",\n  \"classification\": \"NO_FALL\"\n}\n```",
+        "input_mode": "VIDEO",
+        "input_fps": 30.0,
+        "evidence_span_sec": 0.3667
+      }
+    },
+    {
+      "case": "production-crouch",
+      "expected": "NOT_FALL",
+      "result": {
+        "event_id": "production-crouch",
+        "model": "Qwen2.5-VL-3B-Instruct (4-bit NF4)",
+        "verification_scope": "SCENE",
+        "adapter_status": "ONLINE",
+        "verification_method": "VLM_MODEL",
+        "status": "NOT_FALL",
+        "is_true_fall": false,
+        "confidence": null,
+        "uncertainty_flag": false,
+        "scene_observation": "A man enters a room and bends down to pick something up from the floor.",
+        "recovery_observed": false,
+        "evidence_frames_count": 12,
+        "duration_ms": 17812,
+        "raw_model_output": "```json\n{\n    \"start_posture\": \"standing\",\n    \"end_posture\": \"squatting\",\n    \"scene_observation\": \"A man enters a room and bends down to pick something up from the floor.\",\n    \"classification\": \"NO_FALL\"\n}\n```",
+        "input_mode": "VIDEO",
+        "input_fps": 2.2449,
+        "evidence_span_sec": 4.9
+      }
+    }
+  ]
+}

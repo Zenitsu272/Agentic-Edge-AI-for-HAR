@@ -24,7 +24,7 @@ def verify_clip(adapter, video, start=0, end=None, trigger=None, rgb_right_half=
     trigger = trigger if trigger is not None else (start+end)/2
     images = []
     try:
-        for t in np.linspace(start, end, 6):
+        for t in np.linspace(start, end, 12):
             capture.set(cv2.CAP_PROP_POS_FRAMES, round(t*fps))
             ok, frame = capture.read()
             if not ok: continue

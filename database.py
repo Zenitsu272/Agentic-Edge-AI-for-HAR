@@ -181,7 +181,7 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Op
     verified = {}
     if ids:
         placeholders = ','.join('?' for _ in ids)
-        verified = {row['event_id']: json.loads(row['result_json']) for row in conn.execute(
+        verified = {row['event_id']: pose_incident_result(json.loads(row['result_json'])) for row in conn.execute(
             f'SELECT event_id, result_json FROM vlm_verifications WHERE event_id IN ({placeholders})', ids).fetchall()}
     
     result = []
@@ -212,7 +212,12 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Op
     conn.close()
     return result
 
+def pose_incident_result(result):
+    return {**result, 'final_classification':'FALL', 'decision_source':'POSE_MODEL'}
+
+
 def save_verification(result, db_path=None):
+    result = pose_incident_result(result)
     with get_db_connection(db_path) as conn:
         conn.execute('INSERT OR REPLACE INTO vlm_verifications (event_id, updated_at, result_json) VALUES (?, ?, ?)',
                      (result['event_id'], time.time(), json.dumps(result)))
@@ -221,7 +226,7 @@ def save_verification(result, db_path=None):
 def get_verification(event_id, db_path=None):
     with get_db_connection(db_path) as conn:
         row = conn.execute('SELECT result_json FROM vlm_verifications WHERE event_id=?', (event_id,)).fetchone()
-    return json.loads(row[0]) if row else None
+    return pose_incident_result(json.loads(row[0])) if row else None
 
 
 def acknowledge_event_by_id(event_id: str, db_path: Optional[str] = None) -> bool:

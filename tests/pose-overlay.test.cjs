@@ -141,7 +141,7 @@ test('red border and banner expire at ten seconds despite repeated detections an
   c.handleResult(data);
   assert.equal(data.visual_fall_alert_active,false);
   assert.equal(elements.get('fallBanner').hidden,true);
-  assert.equal(elements.get('activityLabel').textContent,'Fall confirmed · VLM');
+  assert.equal(elements.get('activityLabel').textContent,'Fall detected');
 });
 
 test('red alert clears without another video frame and a different incident can alert again',()=>{
@@ -185,6 +185,6 @@ test('a negative VLM result preserves the independent pose alert for review', ()
     stage3_event:{fall_alert_active:true,fall_confirmed:true},
     verification:{status:'NOT_FALL',scene_observation:'Controlled movement.'}});
   assert.equal(elements.get('activityLabel').textContent,'Fall detected');
-  assert.match(elements.get('activityHint').textContent,/retained for review/);
+  assert.match(elements.get('activityHint').textContent,/Fall detected by the pose model/);
   assert.ok(elements.get('cameraView').classList.contains('fall-alert-active'));
 });

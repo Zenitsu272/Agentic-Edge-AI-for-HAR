@@ -70,7 +70,7 @@ def test_ordered_before_trigger_after_frames_and_exactly_once_dispatch():
         assert len(adapter.calls)==1
         candidate,images=adapter.calls[0]
         offsets=[f['relative_sec'] for f in images]
-        assert 3<=len(images)<=6 and offsets==sorted(offsets)
+        assert 3<=len(images)<=12 and offsets==sorted(offsets)
         assert offsets[0]<0 and offsets[-1]>0 and 0 in offsets
         assert all(i['frame'].shape == (100,120,3) for i in images)
         assert candidate['track_id']=='Person 1'
@@ -93,6 +93,9 @@ def test_negative_verdict_does_not_silence_an_active_pose_alert():
         service.observe('stream',result,frame)
         assert result['stage3_event']['fall_alert_active']
         assert result['verification']['status']=='NOT_FALL'
+        assert result['verification']['is_true_fall'] is False
+        assert result['verification']['final_classification']=='FALL'
+        assert result['verification']['decision_source']=='POSE_MODEL'
         await service.close()
     asyncio.run(run())
 
@@ -176,10 +179,11 @@ def test_verdict_storage_retains_incident_and_acknowledgement(tmp_path):
     database.acknowledge_event_by_id('fall-1',path)
     record={'event_id':'fall-1','status':'NOT_FALL','scene_observation':'Controlled sitting.'}
     database.save_verification(record,path)
-    assert database.get_verification('fall-1',path)==record
+    assert database.get_verification('fall-1',path)=={**record,'final_classification':'FALL','decision_source':'POSE_MODEL'}
     event=database.get_events(db_path=path)[0]
     assert event['details']=='Original pose alert' and event['acknowledged']
     assert event['vlm_verification']['status']=='NOT_FALL'
+    assert event['vlm_verification']['final_classification']=='FALL'
 
 
 @pytest.mark.parametrize('output,expected',[
@@ -213,3 +217,46 @@ def test_strict_production_adapter_never_uses_pose_fallback():
     adapter=VLMAdapter(auto_load=False);adapter.status='WEIGHTS_MISSING'
     result=adapter.verify_video_event({'id':'fall-1','kinematics':{'posture':'Lying / Resting','dwell_sec':20}},[np.zeros((30,30,3))]*3)
     assert result['status']=='UNAVAILABLE' and result['is_true_fall'] is None
+
+
+def test_native_video_inputs_include_timing_and_do_not_send_independent_images():
+    adapter=VLMAdapter(auto_load=False);adapter.status='ONLINE'
+    adapter.model=MagicMock();adapter.model.device=torch.device('cpu')
+    adapter.model.generate.return_value=torch.tensor([[1,2,3]])
+    adapter.processor=MagicMock()
+    adapter.processor.return_value={'input_ids':torch.tensor([[1,2]])}
+    adapter.processor.decode.return_value='{"classification":"FALL","scene_observation":"The person drops from upright onto the mat."}'
+    frames=[{'frame':np.zeros((30,40,3),np.uint8),'relative_sec':t} for t in [-.4,0,.4,.8]]
+    result=adapter.verify_video_event({'id':'motion'},frames)
+    inputs=adapter.processor.call_args.kwargs
+    assert 'videos' in inputs and 'images' not in inputs
+    assert inputs['do_sample_frames'] is False
+    assert inputs['video_metadata'][0]['fps']==pytest.approx(2.5)
+    assert inputs['videos'][0].shape==(4,30,40,3)
+    assert adapter.processor.apply_chat_template.call_args.args[0][0]['content'][0]['type']=='video'
+    assert result['input_mode']=='VIDEO' and result['evidence_span_sec']==pytest.approx(1.2)
+
+
+def test_reversed_frame_timestamps_do_not_produce_a_model_verdict():
+    adapter=VLMAdapter(auto_load=False);adapter.status='ONLINE'
+    adapter.model=MagicMock();adapter.processor=MagicMock()
+    frames=[{'frame':np.zeros((30,40,3),np.uint8),'relative_sec':t} for t in [1,.5,0]]
+    result=adapter.verify_video_event({'id':'motion'},frames)
+    assert result['status']=='INCONCLUSIVE'
+    assert not adapter.model.generate.called
+
+
+def test_evidence_waits_for_source_progress_even_when_replay_is_slow():
+    async def run():
+        adapter=Adapter();service=IncidentVerificationService(adapter,persist=lambda r:None,evidence_idle_timeout=.04)
+        service.ready.set();frame=np.zeros((100,120,3),np.uint8)
+        for i in range(22):
+            t=i*.1
+            service.observe('slow',packet(t,event=t>=.4),frame)
+            await asyncio.sleep(.01)
+            if t<1.9:assert not adapter.calls
+        await asyncio.gather(*list(service.tasks))
+        assert len(adapter.calls)==1
+        assert adapter.calls[0][1][-1]['relative_sec']>=1.5
+        await service.close()
+    asyncio.run(run())

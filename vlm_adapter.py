@@ -68,7 +68,7 @@ class VLMAdapter:
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
             self.processor = AutoProcessor.from_pretrained(
                 self.model_dir, local_files_only=True,
-                min_pixels=16*28*28, max_pixels=192*28*28)
+                min_pixels=16*28*28, max_pixels=512*28*28)
             config = AutoConfig.from_pretrained(self.model_dir, local_files_only=True)
             quantization = getattr(config, 'quantization_config', None)
             if isinstance(quantization, dict) and quantization.get('quant_method') == 'bitsandbytes':
@@ -85,6 +85,8 @@ class VLMAdapter:
                 attn_implementation='sdpa'
             )
             self.model.eval()
+            from qwen_video_positions import install_video_position_fix
+            install_video_position_fix(self.model)
             if isinstance(quantization, dict) and quantization.get('quant_method') == 'bitsandbytes':
                 import bitsandbytes as bnb
                 if any(isinstance(layer, bnb.nn.Linear4bit) and
@@ -250,22 +252,44 @@ class VLMAdapter:
     def _run_model_inference(self, candidate_event, frames):
         import torch
         started = time.monotonic()
-        bounded = frames[:6]
+        bounded = frames[:12]
         images = self._prepare_pil_images(bounded)
         if len(images) != len(bounded) or not images:
             return self._unverified(candidate_event, 'INCONCLUSIVE', 'Evidence images could not be decoded.')
         prompt = (
-            "Classify the action across these chronological frames: FALL, NO_FALL, or UNCERTAIN. "
-            "A fall means losing balance and collapsing; deliberate squatting or sitting is NO_FALL. "
-            "Explain the visible movement, then give the classification. "
-            "Return JSON with scene_observation and classification."
+            "Analyze the video in its given chronological order, not reversed. First identify the starting posture, "
+            "then the final posture, then the movement between them. A rapid drop or collapse onto the floor or "
+            "a safety mat is FALL, even in a staged demonstration. Controlled sitting, bending, squatting, or "
+            "already lying still is NO_FALL. Describe only visible motion up to the last frame; do not invent later recovery. "
+            "Return one JSON object with start_posture, end_posture, "
+            "scene_observation describing the transition, and classification (FALL, NO_FALL or UNCERTAIN)."
         )
-        content = [{'type':'image','image':image} for image in images]
-        content.append({'type':'text','text':prompt})
+        # One video token enables Qwen's temporal vision patches and MRoPE.
+        # Separate image tokens encode still pictures and often miss rapid motion.
+        content = [{'type':'video'}, {'type':'text','text':prompt}]
         messages = [{'role':'user','content':content}]
         rendered = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.processor(text=[rendered], images=images, padding=True, return_tensors='pt')
-        inputs = {k:v.to(self.model.device) for k,v in inputs.items()}
+        offsets = [item.get('relative_sec') if isinstance(item,dict) else None for item in bounded]
+        timed = all(isinstance(t,(int,float)) and np.isfinite(t) for t in offsets)
+        if timed and any(b <= a for a,b in zip(offsets, offsets[1:])):
+            return self._unverified(candidate_event, 'INCONCLUSIVE', 'Evidence frame timestamps are not increasing.')
+        # The service samples chronologically; use nearest frames on a uniform
+        # time grid so video FPS describes the input rather than source FPS.
+        if timed:
+            grid = np.linspace(offsets[0], offsets[-1], len(images))
+            indices = [int(np.argmin(np.abs(np.asarray(offsets)-t))) for t in grid]
+            images = [images[i] for i in indices]
+            fps = (len(images)-1) / max(offsets[-1]-offsets[0], .001)
+        else:
+            fps = 4.0  # Legacy offline callers without timestamps.
+        size = images[0].size
+        video = np.stack([np.asarray(image.resize(size)) for image in images])
+        metadata = {'total_num_frames':len(images), 'fps':fps,
+                    'frames_indices':list(range(len(images)))}
+        inputs = self.processor(text=[rendered], videos=[video], video_metadata=[metadata],
+                                do_sample_frames=False, min_pixels=16*28*28, max_pixels=512*28*28,
+                                padding=True, return_tensors='pt')
+        inputs = {k:v.to(self.model.device) if hasattr(v,'to') else v for k,v in inputs.items()}
         with torch.inference_mode():
             generated = self.model.generate(
                 **inputs, max_new_tokens=160, max_length=None, do_sample=False,
@@ -300,7 +324,8 @@ class VLMAdapter:
             'scene_observation':observation if isinstance(observation,str) else 'Model response was not valid structured evidence.',
             'recovery_observed':parsed.get('voluntary_recovery') is True,
             'evidence_frames_count':len(images), 'duration_ms':round((time.monotonic()-started)*1000),
-            'raw_model_output':output[:1200],
+            'raw_model_output':output[:1200], 'input_mode':'VIDEO',
+            'input_fps':round(fps,4), 'evidence_span_sec':round((len(images)-1)/fps,4),
         }
 
     def _parse_model_output(self, text: str) -> Dict[str, Any]:

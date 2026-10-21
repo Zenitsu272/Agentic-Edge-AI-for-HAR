@@ -12,14 +12,14 @@ import database
 
 @dataclass
 class EvidenceSession:
-    frames: deque = field(default_factory=lambda: deque(maxlen=20))
+    frames: deque = field(default_factory=lambda: deque(maxlen=40))
     last_sample: float = -float('inf')
     last_time: float = -float('inf')
     pending: list = field(default_factory=list)
     latest_id: str | None = None
 
 
-def select_keyframes(frames, trigger_time, max_frames=6):
+def select_keyframes(frames, trigger_time, max_frames=12):
     """Keep chronological context, onset, and the final observed posture."""
     if not frames:
         return []
@@ -44,12 +44,13 @@ def prepare_evidence_images(selected, trigger_time):
 
 class IncidentVerificationService:
     def __init__(self, adapter, persist=database.save_verification, post_seconds=1.5,
-                 max_pending=4, model_timeout=60):
+                 max_pending=4, model_timeout=60, evidence_idle_timeout=10):
         self.adapter = adapter
         self.persist = persist
         self.post_seconds = post_seconds
         self.max_pending = max_pending
         self.model_timeout = model_timeout
+        self.evidence_idle_timeout = evidence_idle_timeout
         self.records = {}
         self.tasks = set()
         self.sessions = {}
@@ -104,9 +105,9 @@ class IncidentVerificationService:
         events = result.get('stage3_event', {}).get('active_incidents') or ([event] if event else [])
         fresh_events = [e for e in events if triggered and (e.get('alert_id') or e.get('id')) not in self.records]
         fresh = bool(fresh_events)
-        if source_time-session.last_sample >= .25 or fresh:
+        if source_time-session.last_sample >= .10-1e-6 or fresh:
             h,w = frame.shape[:2]
-            scale = min(1., 448/max(h,w))
+            scale = min(1., 640/max(h,w))
             resized = cv2.resize(frame, (max(1,round(w*scale)),max(1,round(h*scale))))
             ok, encoded = cv2.imencode('.jpg', resized, [cv2.IMWRITE_JPEG_QUALITY,80])
             if ok:
@@ -117,6 +118,7 @@ class IncidentVerificationService:
                 for job in list(session.pending):
                     if not job['ready'].is_set() and (not job['frames'] or source_time > job['frames'][-1]['timestamp_sec']):
                         job['frames'].append(sample)
+                        job['last_progress'] = time.monotonic()
                         if source_time >= job['trigger']+self.post_seconds: job['ready'].set()
         for event in fresh_events:
             event_id = event.get('alert_id') or event.get('id')
@@ -124,6 +126,7 @@ class IncidentVerificationService:
             record = {'event_id':event_id, 'status':'COLLECTING', 'model':self.adapter.model_name,
                       'trigger_time_sec':source_time,
                       'verification_scope':'SCENE',
+                      'final_classification':'FALL', 'decision_source':'POSE_MODEL',
                       'track_id':event.get('track_id'), 'is_true_fall':None,
                       'scene_observation':'Collecting frames before and after the motion.',
                       'evidence_frames_count':0, 'verification_method':'PENDING', 'created_at':time.time()}
@@ -133,6 +136,7 @@ class IncidentVerificationService:
             else:
                 before = [s for s in session.frames if source_time-2.0 <= s['timestamp_sec'] <= source_time]
                 job = {'frames':before, 'trigger':source_time, 'ready':asyncio.Event(),
+                       'last_progress':time.monotonic(),
                        'candidate':{'id':event_id, 'camera_id':'Camera 01', 'track_id':event.get('track_id')}}
                 session.pending.append(job)
                 self._save(record)
@@ -154,10 +158,15 @@ class IncidentVerificationService:
 
     async def _verify(self, job, record, session):
         try:
-            try:
-                await asyncio.wait_for(job['ready'].wait(), timeout=4.0)
-            except asyncio.TimeoutError:
-                pass
+            # A replay can take longer than real time under GPU load. Wait
+            # until its source window is complete, EOF, or no frames arrive.
+            while not job['ready'].is_set():
+                idle_remaining = self.evidence_idle_timeout - (time.monotonic()-job['last_progress'])
+                if idle_remaining <= 0: break
+                try:
+                    await asyncio.wait_for(job['ready'].wait(), timeout=idle_remaining)
+                except asyncio.TimeoutError:
+                    continue
             frames = job['frames']
             if (len(frames)<3 or frames[-1]['timestamp_sec']-job['trigger'] < .35
                     or job['trigger']-frames[0]['timestamp_sec'] < .25):
@@ -190,6 +199,8 @@ class IncidentVerificationService:
                     self._finish(record,'UNAVAILABLE','No actual VLM inference was available; the incident remains unverified.')
                     return
                 record.update(verdict, completed_at=time.time())
+                # The VLM opinion never changes the pose model's incident decision.
+                record.update(final_classification='FALL', decision_source='POSE_MODEL')
                 record['evidence_frames_count'] = len(selected)
                 self._save(record)
         except asyncio.CancelledError:
@@ -205,4 +216,4 @@ class IncidentVerificationService:
 
     def telemetry(self):
         return {'pending_incidents':len(self.tasks), 'capacity':self.max_pending,
-                'model_status':self.adapter.status, 'frames_per_incident':6}
+                'model_status':self.adapter.status, 'frames_per_incident':12}

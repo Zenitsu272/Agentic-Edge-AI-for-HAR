@@ -11,7 +11,7 @@ document.getElementById('app').innerHTML = `
 <div id="livePage" class="page-panel">
 <div class="summary-grid"><div class="summary-card"><span>Standing</span><strong id="standingCount">0</strong><small>Upright posture</small></div><div class="summary-card"><span>Sitting</span><strong id="sittingCount">0</strong><small>Seated geometry</small></div><div class="summary-card fall-summary"><span>Fall</span><strong id="fallCount">0</strong><small>Rapid descent + sustained down pose</small></div><div class="summary-card"><span>Inference</span><strong id="inferenceMetric">—</strong><small id="modelMetric">Loading model status</small></div></div>
 <div class="live-grid"><div class="video-column">
-<section class="video-upload-panel"><div><strong>Check a recorded video</strong><p>MP4, AVI, MOV, MKV or WebM · up to 500 MB. Fall candidates are verified by the local VLM.</p></div><button id="replayButton" class="light-button">Upload video &amp; check</button><input type="file" id="replayInput" accept=".mp4,.avi,.mov,.mkv,.webm" hidden></section>
+<section class="video-upload-panel"><div><strong>Check a recorded video</strong><p>MP4, AVI, MOV, MKV or WebM · up to 500 MB. Pose detections are final; the local VLM adds a scene review.</p></div><button id="replayButton" class="light-button">Upload video &amp; check</button><input type="file" id="replayInput" accept=".mp4,.avi,.mov,.mkv,.webm" hidden></section>
 <section id="videoCheckPanel" class="video-check-progress" aria-live="polite" hidden><div><strong id="videoCheckName"></strong><span id="videoCheckStatus">Uploading…</span></div><progress id="videoCheckProgress" max="100" value="0" aria-label="Video analysis progress"></progress><span id="videoCheckPosition"></span></section>
 <section id="cameraView" class="camera-view" aria-label="Live camera and activity">
 <video id="videoFeed" autoplay playsinline muted></video><img id="serverFrameFeed" alt="Video replay" hidden><canvas id="overlayCanvas" aria-label="Detected body keypoints"></canvas>
@@ -28,7 +28,7 @@ document.getElementById('app').innerHTML = `
 <section class="panel"><div class="panel-heading"><h2><span class="step-number">1</span>Person presence & motion</h2><span id="presenceBadge" class="pill">Idle</span></div><div class="metric-row"><span>People tracked</span><strong id="trackedMetric">0</strong></div><div class="metric-row"><span>Movement</span><strong id="movementMetric">—</strong></div><div class="metric-row"><span>Motion flux</span><strong id="fluxMetric">—</strong></div></section>
 <section class="panel"><div class="panel-heading"><h2><span class="step-number">2</span>Posture & temporal state</h2><span class="pill accent">Active</span></div><div id="personCards"><p class="muted">Waiting for visible body keypoints.</p></div></section>
 <section class="panel"><div class="panel-heading"><h2>Fall observation</h2><span id="fallState" class="pill">Monitoring</span></div><div class="metric-row"><span>Torso descent</span><strong id="descentMetric">—</strong></div><div class="metric-row"><span>Down-pose duration</span><strong id="dwellMetric">—</strong></div><p class="panel-note">A person already lying down is not automatically classified as a fall. Missing joints are marked as limited evidence.</p></section>
-<section id="verificationPanel" class="panel verification-panel"><div class="panel-heading"><h2><span class="step-number">3</span>VLM verification</h2><span id="verificationBadge" class="pill">Loading</span></div><strong id="verificationVerdict" class="verification-verdict" aria-live="polite">Preparing local VLM</strong><p id="verificationReason" class="panel-note">A fall alert sends a short frame sequence for visual verification.</p><div class="metric-row"><span>Evidence frames</span><strong id="verificationFrameCount">—</strong></div><div class="metric-row"><span>Processing time</span><strong id="verificationDuration">—</strong></div><p id="verificationModel" class="verification-model"></p></section>
+<section id="verificationPanel" class="panel verification-panel"><div class="panel-heading"><h2><span class="step-number">3</span>VLM scene review</h2><span id="verificationBadge" class="pill">Loading</span></div><strong id="verificationVerdict" class="verification-verdict" aria-live="polite">Preparing local VLM</strong><p id="verificationReason" class="panel-note">Pose detection decides the fall result. The VLM provides a separate scene review.</p><div class="metric-row"><span>Evidence frames</span><strong id="verificationFrameCount">—</strong></div><div class="metric-row"><span>Processing time</span><strong id="verificationDuration">—</strong></div><p id="verificationModel" class="verification-model"></p></section>
 </aside></div></div>
 <section id="historyPage" class="page-panel panel" hidden><div class="panel-heading"><h2>Activity & alert feed</h2><button class="light-button" id="refreshHistory">Refresh</button></div><p class="panel-note">Persisted activity transitions and fall alerts. Older records retain their original detection method.</p><div id="historyList"></div></section>
 <section id="memoryPage" class="page-panel panel" hidden><div class="panel-heading"><h2>ChromaDB semantic memory</h2><span class="pill">Stored history</span></div><p class="panel-note">Review existing memories. They do not influence the current pose classification.</p><form id="memoryForm" class="search-form"><input id="memoryQuery" placeholder="Search stored memories" aria-label="Search stored memories"><button class="light-button">Search</button></form><div id="memoryList"></div></section>
@@ -136,7 +136,7 @@ async function loadHistory() {
       const content=node('div',''); content.append(node('strong','',`${event.type} · ${event.track_id}`),node('p','',event.details),node('small','muted',`${event.full_timestamp} · ${event.metadata?.classifier_version || 'Previous pipeline'}`)); row.append(content);
       if (event.vlm_verification) {
         const v=event.vlm_verification;
-        content.append(node('p','verification-history',`${verificationLabels[v.status] || v.status}: ${v.scene_observation || ''}`));
+        content.append(node('p','verification-history',`Fall detected · pose model. ${verificationLabels[v.status] || v.status}: ${v.scene_observation || ''}`));
       }
       if(event.severity!=='NORMAL'&&!event.acknowledged) { const btn=node('button','light-button','Acknowledge'); btn.onclick=async()=>{ try {await getJSON(`/api/alerts/${encodeURIComponent(event.alert_id)}/acknowledge`,{method:'POST'}); await loadHistory();} catch(e){btn.textContent='Retry acknowledgement';} }; row.append(btn); }
       else row.append(node('span','pill',event.acknowledged?'Acknowledged':event.severity));
@@ -171,25 +171,25 @@ document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener
 }));
 document.getElementById('refreshHistory').onclick=loadHistory;
 document.getElementById('memoryForm').onsubmit=e=>{e.preventDefault();loadMemory(document.getElementById('memoryQuery').value.trim());};
-getJSON('/api/health').then(h=>{text('systemStatus',`Pose engine online · ${h.hardware.yolo_device}`);text('modelMetric',h.components.pose_estimator.model);if(!currentVerificationId)updateVerification({status:h.components.vlm_provider.status==='ONLINE'?'READY':h.components.vlm_provider.status,model:h.components.vlm_provider.model,scene_observation:h.components.vlm_provider.status==='ONLINE'?'A fall alert sends frames for local scene verification.':h.components.vlm_provider.detail});}).catch(()=>text('systemStatus','Server unavailable'));
+getJSON('/api/health').then(h=>{text('systemStatus',`Pose engine online · ${h.hardware.yolo_device}`);text('modelMetric',h.components.pose_estimator.model);if(!currentVerificationId)updateVerification({status:h.components.vlm_provider.status==='ONLINE'?'READY':h.components.vlm_provider.status,model:h.components.vlm_provider.model,scene_observation:h.components.vlm_provider.status==='ONLINE'?'Pose detections are final. Fall alerts send frames for a separate VLM scene review.':h.components.vlm_provider.detail});}).catch(()=>text('systemStatus','Server unavailable'));
 
-const verificationLabels={WAITING:'Waiting for video frames',COLLECTING:'Collecting evidence',QUEUED:'Waiting for VLM',VERIFYING:'Verifying frames',CONFIRMED_FALL:'VLM: fall confirmed',NOT_FALL:'VLM: not a fall',INCONCLUSIVE:'Inconclusive · check person',READY:'Ready for fall alerts',ONLINE:'Ready for fall alerts',LOADING:'Loading local VLM',NOT_LOADED:'Preparing local VLM',WEIGHTS_MISSING:'VLM model missing',WEIGHTS_INCOMPLETE:'VLM download incomplete',UNAVAILABLE:'VLM unavailable',DISABLED:'VLM disabled',ERROR:'Verification failed',TIMEOUT:'Verification timed out',BUSY:'VLM busy · review incident',INTERRUPTED:'Verification interrupted'};
+const verificationLabels={WAITING:'Waiting for video frames',COLLECTING:'Collecting evidence',QUEUED:'Waiting for VLM',VERIFYING:'Verifying frames',CONFIRMED_FALL:'VLM agrees with detection',NOT_FALL:'VLM disagrees · fall retained',INCONCLUSIVE:'Inconclusive · check person',READY:'Ready for fall alerts',ONLINE:'Ready for fall alerts',LOADING:'Loading local VLM',NOT_LOADED:'Preparing local VLM',WEIGHTS_MISSING:'VLM model missing',WEIGHTS_INCOMPLETE:'VLM download incomplete',UNAVAILABLE:'VLM unavailable',DISABLED:'VLM disabled',ERROR:'Verification failed',TIMEOUT:'Verification timed out',BUSY:'VLM busy · review incident',INTERRUPTED:'Verification interrupted'};
 let currentVerificationId=null, verificationPollTimer=null, verificationHealthTimer=null;
 function updateVerification(record) {
   if(!record.event_id && currentVerificationId) return;
   if(record.event_id) currentVerificationId=record.event_id;
   const status=record.status || 'UNAVAILABLE';
-  text('verificationVerdict',verificationLabels[status] || 'Verification pending');
-  text('verificationReason',record.scene_observation || 'A fall alert sends frames before and after the motion to the local VLM.');
+  text('verificationVerdict',record.event_id ? 'Fall detected · pose model' : (verificationLabels[status] || 'Scene review pending'));
+  text('verificationReason',record.event_id ? `${verificationLabels[status] || 'Scene review pending'}. ${record.scene_observation || ''}` : (record.scene_observation || 'A fall alert sends frames before and after the motion to the local VLM.'));
   text('verificationFrameCount',record.evidence_frames_count || '—');
   text('verificationDuration',record.duration_ms ? `${(record.duration_ms/1000).toFixed(1)} s` : '—');
   text('verificationModel',`${record.event_id ? 'Scene review · ' : ''}${record.model || 'Local vision-language model'}`);
-  const badge=status==='CONFIRMED_FALL'?'Confirmed':status==='NOT_FALL'?'False alarm':status==='INCONCLUSIVE'?'Review':(['COLLECTING','QUEUED','VERIFYING'].includes(status)?'In progress':(['ONLINE','READY'].includes(status)?'Ready':status==='LOADING'?'Loading':status==='WAITING'?'Waiting':'Unavailable'));
+  const badge=status==='CONFIRMED_FALL'?'Reviewed':status==='NOT_FALL'?'Fall retained':status==='INCONCLUSIVE'?'Reviewed':(['COLLECTING','QUEUED','VERIFYING'].includes(status)?'In progress':(['ONLINE','READY'].includes(status)?'Ready':status==='LOADING'?'Loading':status==='WAITING'?'Waiting':'Unavailable'));
   text('verificationBadge',badge);
   document.getElementById('verificationPanel').dataset.state=status.toLowerCase();
   const cameraReview=document.getElementById('cameraVerification');
   cameraReview.hidden=!record.event_id;
-  cameraReview.textContent=verificationLabels[status] || 'VLM review pending';
+  cameraReview.textContent=record.event_id ? 'Fall detected · pose model' : 'VLM review pending';
   cameraReview.dataset.state=status.toLowerCase();
   clearTimeout(verificationPollTimer);
   if(record.event_id && ['COLLECTING','QUEUED','VERIFYING'].includes(status)) {
@@ -200,7 +200,7 @@ function updateVerification(record) {
   }
   if(!record.event_id && ['LOADING','NOT_LOADED'].includes(status)) {
     clearTimeout(verificationHealthTimer);
-    verificationHealthTimer=setTimeout(async()=>{try{const h=await getJSON('/api/health');const v=h.components.vlm_provider;updateVerification({status:v.status==='ONLINE'?'READY':v.status,model:v.model,scene_observation:v.status==='ONLINE'?'A fall alert sends frames for local scene verification.':v.detail});}catch{}},2000);
+    verificationHealthTimer=setTimeout(async()=>{try{const h=await getJSON('/api/health');const v=h.components.vlm_provider;updateVerification({status:v.status==='ONLINE'?'READY':v.status,model:v.model,scene_observation:v.status==='ONLINE'?'Pose detections are final. Fall alerts send frames for a separate VLM scene review.':v.detail});}catch{}},2000);
   }
 }
 
@@ -223,13 +223,13 @@ function renderVideoCheck() {
   const progress=document.getElementById('videoCheckProgress');
   if(check.phase==='uploading')progress.removeAttribute('value');else progress.value=check.percent;
   text('videoCheckPosition',check.phase==='uploading'?'The video stays on this computer.':`${videoTime(check.time)} / ${videoTime(check.duration)} · ${check.frames} / ${check.total} frames checked`);
-  text('videoResultCount',`${records.length} fall candidate${records.length===1?'':'s'}`);
-  let summary=check.phase==='uploading'?'Waiting for the uploaded video.':check.phase==='analysing'?'Checking every frame for standing, sitting and fall motion.':check.phase==='error'?check.error:check.phase==='stopped'?'Analysis stopped. Results below cover only the frames already checked.':!records.length?'No fall candidates detected. No VLM verification was triggered.':pending?`Frames checked. Waiting for ${pending} VLM review${pending===1?'':'s'} to finish.`:`Video checked · ${records.filter(r=>r.status==='CONFIRMED_FALL').length} VLM-confirmed · ${records.filter(r=>r.status==='NOT_FALL').length} no-fall verdicts · ${records.filter(r=>!['CONFIRMED_FALL','NOT_FALL'].includes(r.status)).length} need review.`;
+  text('videoResultCount',`${records.length} fall${records.length===1?'':'s'} detected`);
+  let summary=check.phase==='uploading'?'Waiting for the uploaded video.':check.phase==='analysing'?'Checking every frame for standing, sitting and fall motion.':check.phase==='error'?check.error:check.phase==='stopped'?'Analysis stopped. Results below cover only the frames already checked.':!records.length?'No fall candidates detected. No VLM verification was triggered.':pending?`${records.length} fall${records.length===1?'':'s'} detected. Waiting for ${pending} VLM review${pending===1?'':'s'} to finish.`:`Video checked · ${records.length} fall${records.length===1?'':'s'} detected by the pose model. VLM reviews do not change this result.`;
   text('videoResultSummary',summary);
   const list=document.getElementById('videoIncidentList');list.replaceChildren();
   for(const record of records) {
     const row=node('article','video-incident');
-    row.append(node('strong','',`${videoTime(record.trigger_time_sec)} · ${verificationLabels[record.status] || record.status}`),node('p','',record.scene_observation || 'Awaiting VLM review.'));
+    row.append(node('strong','',`${videoTime(record.trigger_time_sec)} · Fall detected · pose model`),node('p','',`${verificationLabels[record.status] || record.status}. ${record.scene_observation || 'Awaiting VLM review.'}`));
     list.append(row);
   }
 }

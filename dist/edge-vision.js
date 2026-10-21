@@ -149,17 +149,14 @@ class EdgeVisionClient {
     this.poses = data.poses || (pose.keypoints?.length ? [{keypoints: pose.keypoints, posture: pose.posture, box: pose.box}] : []);
     const fallAlert = data.stage3_event?.fall_alert_active ?? data.stage3_event?.fall_confirmed;
     data.visual_fall_alert_active = this.updateFallAppearance(data.stage3_event || {});
-    const review = data.verification;
     const activity = fallAlert
-      ? (review?.status === 'CONFIRMED_FALL' ? 'Fall confirmed · VLM' : 'Fall detected')
+      ? 'Fall detected'
       : (!presence.person_present ? 'No person detected' : pose.posture);
     document.getElementById('activityLabel').textContent = activity;
     document.getElementById('personCount').textContent = presence.person_present ? `${presence.persons_count} ${presence.persons_count === 1 ? 'person' : 'people'} detected` : 'No person detected';
     document.getElementById('latencyLabel').textContent = `${Math.round(data.inference_ms)} ms`;
     document.getElementById('activityHint').textContent = fallAlert
-      ? (review?.status === 'NOT_FALL' ? 'VLM reports no fall. The pose alert is retained for review.'
-        : review?.status === 'CONFIRMED_FALL' ? review.scene_observation
-        : data.stage3_event.fall_detection_level === 'possible_partial' ? 'Possible / partial fall after sudden motion. Check the person.' : 'Fall alert active. Check the person.')
+      ? (data.stage3_event.fall_detection_level === 'possible_partial' ? 'Possible / partial fall after sudden motion. Check the person.' : 'Fall detected by the pose model. Check the person.')
       : (!presence.person_present ? 'Step into the camera view to begin.' : pose.details);
     window.updateDashboard?.(data);
     this.drawOverlay();
