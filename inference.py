@@ -3,6 +3,7 @@ import time
 import base64
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 import numpy as np
 import cv2
 import torch
@@ -17,10 +18,14 @@ class InferencePipeline:
         print(f"[InferencePipeline] Target Device: CPU (YOLO models running on CPU to preserve VRAM for Qwen2.5-VL VLM on GPU)")
         print("[InferencePipeline] Loading YOLOv8n (Person Presence) & YOLO11n-Pose (Biomechanics)...")
         
+        models_dir = Path(__file__).parent / "models"
+        v8_path = str(models_dir / "yolov8n.pt") if (models_dir / "yolov8n.pt").exists() else "yolov8n.pt"
+        pose_path = str(models_dir / "yolo11n-pose.pt") if (models_dir / "yolo11n-pose.pt").exists() else "yolo11n-pose.pt"
+
         # Stage 1: Person presence gate
-        self.motion_model = YOLO("yolov8n.pt")
+        self.motion_model = YOLO(v8_path)
         # Stage 2: Biomechanical 17-keypoint Human Activity & Posture model
-        self.pose_model = YOLO("yolo11n-pose.pt")
+        self.pose_model = YOLO(pose_path)
         
         self.motion_model.to("cpu")
         self.pose_model.to("cpu")

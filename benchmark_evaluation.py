@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 from inference import InferencePipeline
 
-GROUND_TRUTH_PATH = Path(__file__).parent / "benchmark_ground_truth.json"
+DATA_DIR = Path(__file__).parent / "data"
+GROUND_TRUTH_PATH = DATA_DIR / "benchmark_ground_truth.json" if (DATA_DIR / "benchmark_ground_truth.json").exists() else Path(__file__).parent / "benchmark_ground_truth.json"
 
 def evaluate_predictions_against_ground_truth(predicted_events, ground_truth_data):
     """
@@ -194,7 +195,7 @@ def run_benchmark(video_path=r"D:\Recording 2026-10-20 130626.mp4"):
         "state_transitions": timeline[:15]
     }
 
-    out_file = Path(__file__).parent / "benchmark_results.json"
+    out_file = (DATA_DIR / "benchmark_results.json") if DATA_DIR.exists() else (Path(__file__).parent / "benchmark_results.json")
     with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
 

@@ -174,7 +174,9 @@ def get_agent_traces(limit: int = 10):
 @app.get("/api/benchmark")
 def get_measured_benchmark():
     """Returns genuine empirical benchmark evaluation results."""
-    bench_file = Path(__file__).parent / "benchmark_results.json"
+    bench_file = Path(__file__).parent / "data" / "benchmark_results.json"
+    if not bench_file.exists():
+        bench_file = Path(__file__).parent / "benchmark_results.json"
     if bench_file.exists():
         with open(bench_file, "r") as f:
             data = json.load(f)

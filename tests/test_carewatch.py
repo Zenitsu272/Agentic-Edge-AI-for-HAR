@@ -189,7 +189,9 @@ class TestCareWatchPlatform:
 
     # 10. Measured Benchmark Results File Validity
     def test_benchmark_results_structure(self):
-        bench_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "benchmark_results.json"))
+        bench_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "benchmark_results.json"))
+        if not os.path.exists(bench_path):
+            bench_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "benchmark_results.json"))
         assert os.path.exists(bench_path)
         with open(bench_path, "r") as f:
             b = json.load(f)
@@ -207,7 +209,9 @@ class TestCareWatchPlatform:
         from inference import InferencePipeline
         pipe = InferencePipeline()
         
-        avi_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_fall_clip.avi"))
+        avi_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "replays", "sample_fall_clip.avi"))
+        if not os.path.exists(avi_path):
+            avi_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_fall_clip.avi"))
         assert os.path.exists(avi_path), f".avi test video missing at {avi_path}"
         
         cap = cv2.VideoCapture(avi_path)
