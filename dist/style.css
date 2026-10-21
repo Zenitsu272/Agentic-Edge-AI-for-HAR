@@ -38,6 +38,18 @@ main { padding: 0 24px 24px; }
 .camera-view:fullscreen, .camera-view.expanded { width: 100vw; height: 100dvh; min-height: 0; border-radius: 0; }
 .camera-view.expanded { position: fixed; inset: 0; z-index: 100; }
 .camera-view::backdrop { background: #101916; }
+.verification-verdict { display:block; font-size:17px; font-weight:650; line-height:1.4; }
+.verification-model { font-size:10px; color:#849185; overflow-wrap:anywhere; margin:12px 0 0; }
+.verification-panel[data-state="confirmed_fall"] { border-color:#df5b64; background:#fff2ef; }
+.verification-panel[data-state="confirmed_fall"] .verification-verdict { color:#b02d3b; }
+.verification-panel[data-state="not_fall"] { border-color:#8bbda1; background:#f0f8f1; }
+.verification-panel[data-state="not_fall"] .verification-verdict { color:#2e7151; }
+.verification-panel[data-state="collecting"],.verification-panel[data-state="queued"],.verification-panel[data-state="verifying"] { border-color:#d4b76d; }
+.verification-history { padding:10px 12px; border-left:3px solid #8aaf98; background:#f0f4ec; }
+.camera-status-group { display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+.camera-verification { padding:6px 9px; border-radius:6px; background:#3e3422ed; color:#ffe5a3; font-size:11px; font-weight:650; }
+.camera-verification[data-state="confirmed_fall"] { background:#6c2028ed; color:#ffd4d8; }
+.camera-verification[data-state="not_fall"] { background:#163e2bed; color:#baf1d4; }
 /* Persistent visual alert, including when the camera enters native fullscreen. */
 body.fall-alert-active::after,
 .camera-view.fall-alert-active::after {
@@ -86,6 +98,14 @@ main { padding: 0 10px 10px; }
 .fall-summary { border-top:3px solid #d58264; padding-top:15px; }
 .live-grid { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:20px; align-items:start; }
 .video-column,.analysis-column { min-width:0; }
+.video-upload-panel { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:17px 18px; margin-bottom:14px; border:1px solid #cbdccc; background:#edf4ec; border-radius:12px; }
+.video-upload-panel strong { font-size:14px; }.video-upload-panel p { margin:6px 0 0; font-size:11px; line-height:1.6; color:#69816d; }
+.video-upload-panel button { flex-shrink:0; background:#254c39; color:#fff; border-color:#254c39; padding:12px 15px; }
+.video-upload-panel button:hover { background:#326448; }.video-upload-panel button:disabled { opacity:.55; cursor:wait; }
+.video-check-progress { margin:0 0 14px; padding:14px 16px; border:1px solid #d9dfd2; border-radius:10px; background:#fcfcf8; font-size:11px; color:#71826e; }
+.video-check-progress>div { display:flex; justify-content:space-between; gap:14px; margin-bottom:10px; }.video-check-progress strong { color:#35533e; overflow-wrap:anywhere; }.video-check-progress progress { width:100%; height:8px; accent-color:#3e9273; display:block; margin-bottom:9px; }
+.video-results { margin:12px 0; }.video-incident { padding:12px 0; border-top:1px solid #e2e7dc; font-size:12px; }.video-incident strong{display:block;margin-bottom:6px}.video-incident p{font-size:11px;line-height:1.6;color:#73816f;margin:4px 0}
+@media(max-width:760px){.video-upload-panel{align-items:stretch;flex-direction:column}.video-upload-panel button{width:100%}.video-check-progress>div{flex-direction:column;gap:6px}}
 .analysis-column { display:grid; gap:14px; }
 .camera-view { height:clamp(430px,calc(100dvh - 300px),720px); min-height:0; border-radius:14px; }
 .camera-toolbar { padding:16px 16px 50px; gap:10px; }

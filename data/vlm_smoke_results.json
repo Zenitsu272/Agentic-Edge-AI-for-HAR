@@ -1,0 +1,63 @@
+{
+  "checked_at": "2026-10-21T22:10:29.007785+05:30",
+  "scope": "Development smoke checks, not held-out accuracy or clinical validation",
+  "model": "unsloth/Qwen2.5-VL-3B-Instruct-bnb-4bit",
+  "revision": "f9adca15cefb612e7f03a1c8a5fddb920b1786f3",
+  "runtime": {
+    "torch": "2.11.0+cu128",
+    "transformers": "5.15.1",
+    "bitsandbytes": "0.50.2",
+    "accelerate": "1.15.0"
+  },
+  "source": "https://fenix.ur.edu.pl/~mkepski/ds/uf.html",
+  "cases": [
+    {
+      "clip": "fall-01-cam0",
+      "input": "Actual camera WebSocket, automatic pose trigger at 3.4 seconds",
+      "expected": "FALL",
+      "observed": {
+        "status": "CONFIRMED_FALL",
+        "is_true_fall": true,
+        "verification_method": "VLM_MODEL",
+        "evidence_frames_count": 6,
+        "duration_ms": 6579,
+        "scene_observation": "A man stands in an office space, facing the camera. He then bends down and falls to the floor. The man is standing in an office space, facing the camera. He then bends down and falls to the floor."
+      },
+      "evidence_offsets_sec": [
+        -1.9,
+        -1.3,
+        -0.7,
+        0.0,
+        0.6,
+        1.5
+      ]
+    },
+    {
+      "clip": "adl-01-cam0",
+      "input": "Six frames across the RGB clip, no pose trigger required for standalone evaluation",
+      "expected": "NO_FALL",
+      "observed": {
+        "status": "NOT_FALL",
+        "is_true_fall": false,
+        "verification_method": "VLM_MODEL",
+        "evidence_frames_count": 6,
+        "duration_ms": 3078,
+        "scene_observation": "A man in a plaid shirt bends down to pick something up from the floor."
+      }
+    },
+    {
+      "clip": "fall-01-cam0",
+      "input": "Six evenly sampled frames across the whole RGB clip",
+      "expected": "FALL",
+      "observed": {
+        "status": "NOT_FALL",
+        "is_true_fall": false,
+        "verification_method": "VLM_MODEL",
+        "evidence_frames_count": 6,
+        "duration_ms": 5359,
+        "scene_observation": "A man stands in an office space, then bends down to pick something up from the floor."
+      },
+      "limitation": "Missed fall with this different frame sampling. VLM negatives do not dismiss pose alerts."
+    }
+  ]
+}

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function client(width, height) {
+function client(width, height, overrides={}) {
   const dots = [];
   const context = new Proxy({arc: (x, y) => dots.push([x, y]), measureText: () => ({width: 40})}, {get: (o,k) => o[k] || (() => {})});
   const elements = new Map();
@@ -17,12 +17,13 @@ function client(width, height) {
     return elements.get(id);
   };
   const sandbox = {document: {body: element('body'), getElementById: element, createElement: () => element('capture')}, window: {devicePixelRatio: 2}, ResizeObserver: class {observe(){}}, clearTimeout, URL};
+  Object.assign(sandbox,overrides);
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync('dist/edge-vision.js','utf8') + '\nthis.client = new EdgeVisionClient();', sandbox);
   const c = sandbox.client;
   c.running = true; c.frameWidth = 640; c.frameHeight = 480;
   c.poses = [{keypoints: [[100,100,.9]]}];
-  return {c, dots, elements};
+  return {c, dots, elements, sandbox};
 }
 
 test('landmarks account for letterboxing, pixel density and fullscreen resizing', () => {
@@ -33,6 +34,43 @@ test('landmarks account for letterboxing, pixel density and fullscreen resizing'
   c.overlay.clientWidth = 640; c.overlay.clientHeight = 480;
   c.drawOverlay();
   assert.deepEqual(dots[1], [100,100]);
+});
+
+test('video selection uploads for single-pass server analysis', async () => {
+  let uploaded,endpoint;
+  const {c,sandbox}=client(640,480,{
+    AbortController,FormData:class {append(name,file){uploaded=file;}},
+    fetch:async(url,options)=>({ok:true,json:async()=>({status:'success',filename:'upload.avi',total_frames:4})})
+  });
+  let began=false,ready=false;
+  sandbox.window.beginVideoCheck=()=>{began=true;};sandbox.window.videoUploadReady=()=>{ready=true;};
+  c.connect=value=>{endpoint=value;};
+  const file={name:'clip.avi'};await c.startReplay(file);
+  assert.equal(uploaded,file);assert.ok(began && ready);
+  assert.equal(endpoint,'/ws/replay_stream?video=upload.avi&loop=false');
+  assert.equal(c.serverReplay,true);assert.equal(c.mirrored,false);
+});
+
+test('a completed video keeps its preview without a connection-lost error',async()=>{
+  let socket,completed=false;
+  class WS {constructor(){socket=this;}close(){}}
+  const {c,elements,sandbox}=client(640,480,{WebSocket:WS,location:{protocol:'http:',host:'localhost'},setTimeout});
+  sandbox.window.finishVideoCheck=()=>{completed=true;};
+  c.serverReplay=true;c.connect('/ws/replay_stream');socket.onopen();
+  await socket.onmessage({data:JSON.stringify({type:'video_complete',processed_frames:4,incidents:[]})});
+  socket.onclose();
+  assert.ok(completed && c.completed);
+  assert.equal(elements.get('cameraStatus').textContent,'Video checked');
+  assert.equal(c.running,true);c.stop();
+});
+
+test('stopping an upload aborts it and prevents a late video connection',async()=>{
+  let signal,connections=0;
+  const {c}=client(640,480,{AbortController,FormData:class {append(){}},
+    fetch:async(url,options)=>new Promise((resolve,reject)=>{signal=options.signal;signal.addEventListener('abort',()=>reject(new Error('aborted')));})});
+  c.connect=()=>connections++;
+  const upload=c.startReplay({name:'clip.mp4'});c.stop();await upload;
+  assert.ok(signal.aborted);assert.equal(connections,0);
 });
 
 test('only camera landmarks are mirrored, and low-confidence joints are hidden', () => {
@@ -82,4 +120,16 @@ test('a partial fall alert is displayed before strict confirmation', () => {
   assert.ok(elements.get('cameraView').classList.contains('fall-alert-active'));
   c.stop();
   assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
+});
+
+test('a negative VLM result preserves the independent pose alert for review', () => {
+  const {c,elements}=client(640,480);
+  c.handleResult({frame_width:640,frame_height:480,poses:[],inference_ms:20,
+    stage1_presence:{person_present:true,persons_count:1},
+    stage2_posture:{posture:'Fall detected',category:'Fall'},
+    stage3_event:{fall_alert_active:true,fall_confirmed:true},
+    verification:{status:'NOT_FALL',scene_observation:'Controlled movement.'}});
+  assert.equal(elements.get('activityLabel').textContent,'Fall detected');
+  assert.match(elements.get('activityHint').textContent,/retained for review/);
+  assert.ok(elements.get('cameraView').classList.contains('fall-alert-active'));
 });

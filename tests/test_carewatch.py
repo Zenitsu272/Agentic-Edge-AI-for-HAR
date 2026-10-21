@@ -3,7 +3,11 @@ import sys
 import time
 import json
 import asyncio
+import hashlib
+import tempfile
 from unittest.mock import MagicMock
+import chromadb
+from chromadb.api.types import EmbeddingFunction
 import numpy as np
 import pytest
 from PIL import Image
@@ -20,14 +24,42 @@ from agent import CareWatchAgent
 from agent_graph import IncidentInvestigationGraph, IncidentCoordinator
 from benchmark_evaluation import evaluate_predictions_against_ground_truth
 
+
+class FixtureEmbedding(EmbeddingFunction):
+    """Offline vectors for storage tests; these do not test semantic accuracy."""
+    def __init__(self):
+        pass
+
+    def __call__(self, input):
+        return [[(value + 1) / 256 for value in hashlib.sha256(text.encode()).digest()]
+                for text in input]
+
+    @staticmethod
+    def name():
+        return 'carewatch-test-embedding'
+
+    def get_config(self):
+        return {}
+
+    @staticmethod
+    def build_from_config(config):
+        return FixtureEmbedding()
+
+
 class TestCareWatchPlatform:
     @classmethod
     def setup_class(cls):
         database.init_db()
         cls.tracker = CentroidTracker(max_missed_frames=10, max_distance=100.0)
-        cls.vlm = VLMAdapter()
+        # Unit tests must not allocate the production GPU model.
+        cls.vlm = VLMAdapter(auto_load=False)
+        cls.vlm.status = 'WEIGHTS_MISSING'
         cls.policy = EscalationPolicy()
-        cls.chroma = ChromaAgentMemory()
+        cls.chroma = object.__new__(ChromaAgentMemory)
+        cls.chroma.client = chromadb.PersistentClient(path=tempfile.mkdtemp(prefix='carewatch-chroma-test-'))
+        cls.chroma.collection = cls.chroma.client.get_or_create_collection(
+            'carewatch_agent_memory', embedding_function=FixtureEmbedding(),
+            metadata={'hnsw:space':'cosine'})
         cls.agent = CareWatchAgent(cls.chroma, cls.vlm, cls.policy)
 
     # 1. Person present and stationary vs moving
@@ -204,15 +236,17 @@ class TestCareWatchPlatform:
         assert b["event_level_f1_pct"] == 100.0
 
     # 11. Support and Decoding of .avi Video Format
-    def test_avi_video_decoding_and_pipeline(self):
+    def test_avi_video_decoding_and_pipeline(self, tmp_path):
         import cv2
         from inference import InferencePipeline
         pipe = InferencePipeline()
         
-        avi_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "replays", "sample_fall_clip.avi"))
-        if not os.path.exists(avi_path):
-            avi_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sample_fall_clip.avi"))
-        assert os.path.exists(avi_path), f".avi test video missing at {avi_path}"
+        # This checks decoding and the pipeline schema, not fall accuracy.
+        avi_path = str(tmp_path / 'decode.avi')
+        writer = cv2.VideoWriter(avi_path, cv2.VideoWriter_fourcc(*'MJPG'), 10, (320,240))
+        assert writer.isOpened()
+        for _ in range(3): writer.write(np.zeros((240,320,3),np.uint8))
+        writer.release()
         
         cap = cv2.VideoCapture(avi_path)
         assert cap.isOpened(), "OpenCV failed to open .avi video"
@@ -458,7 +492,8 @@ class TestCareWatchPlatform:
         assert comps["remote_notification_provider"]["status"] == "NOT_CONFIGURED"
         assert comps["person_detector"]["status"] == "ONLINE"
         assert comps["pose_estimator"]["status"] == "ONLINE"
-        assert comps["langgraph_orchestration"]["status"] == ("ONLINE" if VLM_ENABLED else "DISABLED")
+        assert comps["langgraph_orchestration"]["status"] == "DISABLED"
+        assert comps['incident_verification']['capacity'] == 4
 
     # 23. P1-7 Historical Memory Cannot Independently Turn Non-Fall into Fall
     def test_historical_memory_cannot_fabricate_fall(self):

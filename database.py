@@ -41,6 +41,13 @@ def init_db(db_path: Optional[str] = None):
 
     # 2. Agent Operational Audit Traces Table
     cursor.execute("""
+    CREATE TABLE IF NOT EXISTS vlm_verifications (
+        event_id TEXT PRIMARY KEY,
+        updated_at REAL NOT NULL,
+        result_json TEXT NOT NULL
+    )
+    """)
+    cursor.execute("""
     CREATE TABLE IF NOT EXISTS agent_traces (
         run_id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -170,6 +177,12 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Op
     
     cursor.execute(query, params)
     rows = cursor.fetchall()
+    ids = [row['id'] for row in rows]
+    verified = {}
+    if ids:
+        placeholders = ','.join('?' for _ in ids)
+        verified = {row['event_id']: json.loads(row['result_json']) for row in conn.execute(
+            f'SELECT event_id, result_json FROM vlm_verifications WHERE event_id IN ({placeholders})', ids).fetchall()}
     
     result = []
     for r in rows:
@@ -186,6 +199,7 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Op
             "severity": r["severity"],
             "detector_status": r["detector_status"],
             "vlm_status": r["vlm_status"],
+            "vlm_verification": verified.get(r['id']),
             "policy_decision": r["policy_decision"],
             "details": r["details"],
             "posture_trajectory": r["posture_trajectory"],
@@ -197,6 +211,18 @@ def get_events(limit: int = 50, acknowledged: Optional[bool] = None, db_path: Op
         })
     conn.close()
     return result
+
+def save_verification(result, db_path=None):
+    with get_db_connection(db_path) as conn:
+        conn.execute('INSERT OR REPLACE INTO vlm_verifications (event_id, updated_at, result_json) VALUES (?, ?, ?)',
+                     (result['event_id'], time.time(), json.dumps(result)))
+
+
+def get_verification(event_id, db_path=None):
+    with get_db_connection(db_path) as conn:
+        row = conn.execute('SELECT result_json FROM vlm_verifications WHERE event_id=?', (event_id,)).fetchone()
+    return json.loads(row[0]) if row else None
+
 
 def acknowledge_event_by_id(event_id: str, db_path: Optional[str] = None) -> bool:
     conn = get_db_connection(db_path)

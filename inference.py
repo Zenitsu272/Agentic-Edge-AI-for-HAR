@@ -113,6 +113,14 @@ class InferencePipeline:
                                        detection_confidence=round(float(result.boxes.conf[index]),3)))
         poses = self.activity_tracker.update(detections, now, frame.shape)
         for pose in poses: self._persist_changes(pose, now)
+        active_incidents = []
+        for pose in poses:
+            if pose['state'] in ('PARTIAL_FALL','VERIFYING','FALL_CONFIRMED'):
+                track = self.activity_tracker.tracks[pose['track_id']]
+                pose['incident_id'] = track.event_id
+                if track.event_id:
+                    active_incidents.append({'alert_id':track.event_id, 'track_id':f"Person {pose['track_id']}",
+                                             'detector_status':pose['state']})
         # Prefer a fall, then a person with usable body geometry, never arbitrary model order.
         primary = max(poses, key=lambda p: (p['category']=='Fall', p['state'] in ('VERIFYING', 'PARTIAL_FALL'),
                       p['category'] in ('Standing','Sitting'), p['features']['visible_keypoints'],
@@ -163,6 +171,7 @@ class InferencePipeline:
                 'normalized_drop_speed': primary['drop_speed'] if primary else 0,
                 'ground_dwell_sec': primary['dwell_sec'] if primary else 0,
                 'active_alert': alert['event'] if alert['active'] else None,
+                'active_incidents': active_incidents,
             }
         }
 

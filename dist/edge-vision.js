@@ -34,41 +34,42 @@ class EdgeVisionClient {
   }
   async startReplay(file) {
     this.stop();
+    this.checkingVideo = true;
     const token = this.generation;
-    this.setStatus('Opening video…');
-    this.objectURL = URL.createObjectURL(file);
-    this.video.src = this.objectURL;
-    this.video.loop = true;
+    window.beginVideoCheck?.(file.name);
+    this.setStatus('Uploading video…');
+    document.getElementById('stopButton').disabled = false;
+    const controller = new AbortController();
+    this.uploadAbort = controller;
     try {
-      await this.video.play();
-      if (token !== this.generation) return;
-      this.connect('/ws/pipeline');
-    } catch {
-      if (token !== this.generation) return;
-      this.video.pause();
-      this.video.hidden = true;
-      this.image.hidden = false;
-      this.setStatus('Preparing video…');
       const body = new FormData();
       body.append('file', file);
-      const response = await fetch('/api/upload_video', {method: 'POST', body});
+      const response = await fetch('/api/upload_video', {method: 'POST', body, signal:controller.signal});
       const data = await response.json();
       if (token !== this.generation) return;
       if (!response.ok || data.status !== 'success') throw new Error(data.message || 'Could not open this video.');
+      this.video.hidden = true;
+      this.image.hidden = false;
       this.serverReplay = true;
-      this.connect(`/ws/replay_stream?video=${encodeURIComponent(data.filename)}`);
+      window.videoUploadReady?.(data);
+      this.connect(`/ws/replay_stream?video=${encodeURIComponent(data.filename)}&loop=false`);
+    } catch(error) {
+      if (token === this.generation) throw error;
+    } finally {
+      if (this.uploadAbort === controller) this.uploadAbort = null;
     }
   }
   connect(endpoint) {
     const token = this.generation;
     this.running = true;
+    this.completed = false;
     this.setStatus('Connecting…');
     document.getElementById('stopButton').disabled = false;
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${endpoint}`);
     this.ws = ws;
     ws.onopen = () => {
       if (token !== this.generation) return;
-      this.setStatus(this.stream ? 'Camera live' : 'Video replay');
+      this.setStatus(this.stream ? 'Camera live' : 'Checking uploaded video');
       document.getElementById('cameraView').classList.add('is-live');
       document.getElementById('emptyState').hidden = true;
       document.getElementById('activityLabel').textContent = 'Looking for a person…';
@@ -80,17 +81,24 @@ class EdgeVisionClient {
       try {
         const data = JSON.parse(event.data);
         if (data.error) throw new Error(data.error);
+        if (data.type === 'video_complete') {
+          this.completed = true;
+          this.setStatus('Video checked');
+          window.finishVideoCheck?.(data);
+          return;
+        }
         if (data.rendered_frame) {
           this.image.src = data.rendered_frame;
           await this.image.decode();
           if (token !== this.generation) return;
         }
         this.handleResult(data);
+        if (data.video_progress) window.updateVideoCheck?.(data);
         if (!this.serverReplay) this.frameTimer = setTimeout(() => this.sendFrame(), 35);
       } catch (error) { if (token === this.generation) this.fail(error.message); }
     };
     ws.onerror = () => { if (token === this.generation) this.fail('Cannot connect to the detection server. Try Start camera again.'); };
-    ws.onclose = () => { if (token === this.generation && this.running) this.fail('Connection lost. Start the camera again to reconnect.'); };
+    ws.onclose = () => { if (token === this.generation && this.running && !this.completed) this.fail('Connection lost. Start the camera again to reconnect.'); };
     this.responseTimer = setTimeout(() => this.fail('The detection server did not respond. Try again.'), 20000);
   }
   sendFrame() {
@@ -113,12 +121,17 @@ class EdgeVisionClient {
     this.poses = data.poses || (pose.keypoints?.length ? [{keypoints: pose.keypoints, posture: pose.posture, box: pose.box}] : []);
     const fallAlert = data.stage3_event?.fall_alert_active ?? data.stage3_event?.fall_confirmed;
     this.setAlertAppearance(fallAlert);
-    const activity = fallAlert ? 'Fall detected' : (!presence.person_present ? 'No person detected' : pose.posture);
+    const review = data.verification;
+    const activity = fallAlert
+      ? (review?.status === 'CONFIRMED_FALL' ? 'Fall confirmed · VLM' : 'Fall detected')
+      : (!presence.person_present ? 'No person detected' : pose.posture);
     document.getElementById('activityLabel').textContent = activity;
     document.getElementById('personCount').textContent = presence.person_present ? `${presence.persons_count} ${presence.persons_count === 1 ? 'person' : 'people'} detected` : 'No person detected';
     document.getElementById('latencyLabel').textContent = `${Math.round(data.inference_ms)} ms`;
     document.getElementById('activityHint').textContent = fallAlert
-      ? (data.stage3_event.fall_detection_level === 'possible_partial' ? 'Possible / partial fall after sudden motion. Check the person.' : 'Fall alert active. Check the person.')
+      ? (review?.status === 'NOT_FALL' ? 'VLM reports no fall. The pose alert is retained for review.'
+        : review?.status === 'CONFIRMED_FALL' ? review.scene_observation
+        : data.stage3_event.fall_detection_level === 'possible_partial' ? 'Possible / partial fall after sudden motion. Check the person.' : 'Fall alert active. Check the person.')
       : (!presence.person_present ? 'Step into the camera view to begin.' : pose.details);
     window.updateDashboard?.(data);
     this.drawOverlay();
@@ -163,12 +176,17 @@ class EdgeVisionClient {
     }
   }
   fail(message) {
+    const videoFailure = this.checkingVideo;
     this.stop();
+    if (videoFailure) window.videoCheckFailed?.(message);
     const error = document.getElementById('cameraError');
     error.textContent = message; error.hidden = false;
   }
   stop() {
     this.generation++; this.running = false;
+    this.checkingVideo = false;
+    this.uploadAbort?.abort(); this.uploadAbort = null;
+    window.stopVideoCheck?.();
     this.setAlertAppearance(false);
     window.resetDashboard?.();
     clearTimeout(this.frameTimer); clearTimeout(this.responseTimer);

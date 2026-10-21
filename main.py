@@ -3,6 +3,9 @@ import json
 import time
 import asyncio
 import base64
+import uuid
+import math
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict
 from pathlib import Path
 import torch
@@ -21,14 +24,26 @@ from central_server import ChromaAgentMemory
 from vlm_adapter import VLMAdapter
 from policy import EscalationPolicy
 from agent import CareWatchAgent
+from incident_verification import IncidentVerificationService
 
-app = FastAPI(title="CareWatch | Agentic Edge AI Platform for HAR & Fall Detection")
+@asynccontextmanager
+async def app_lifespan(app):
+    if VLM_ENABLED:
+        await verification_service.start()
+    try:
+        yield
+    finally:
+        await verification_service.close()
+
+
+app = FastAPI(lifespan=app_lifespan, title="CareWatch | Agentic Edge AI Platform for HAR & Fall Detection")
 
 # Initialize Edge & Central AI components
 pipeline = InferencePipeline()
 chroma_memory = ChromaAgentMemory()
-VLM_ENABLED = os.getenv("CAREWATCH_ENABLE_VLM", "0").lower() in ("1", "true", "yes")
-vlm_adapter = VLMAdapter(auto_load=VLM_ENABLED)
+VLM_ENABLED = os.getenv("CAREWATCH_ENABLE_VLM", "1").lower() in ("1", "true", "yes")
+vlm_adapter = VLMAdapter(auto_load=False)
+verification_service = IncidentVerificationService(vlm_adapter)
 if not VLM_ENABLED:
     vlm_adapter.status = "DISABLED"
     vlm_adapter.status_detail = "Pose-only mode. VLM verification is disabled."
@@ -47,14 +62,33 @@ def serve_index():
     index_file = DIST_DIR / "index.html"
     return FileResponse(index_file)
 
+def attach_verification(session_pipeline, result, frame):
+    if not VLM_ENABLED:
+        result['central_server'] = {'status':'DISABLED', 'verification_mode':'POSE_ONLY'}
+        result['verification'] = {'status':'DISABLED', 'model':vlm_adapter.model_name,
+                                  'scene_observation':'VLM verification is disabled.'}
+        return
+    verification_service.observe(session_pipeline.session_id, result, frame)
+    result['central_server'] = {'status':result['verification']['status'],
+                                'verification_mode':'LOCAL_VLM',
+                                'vlm_verification':result['verification']}
+
+
+@app.get('/api/verification/{event_id}')
+def read_verification(event_id: str):
+    result = database.get_verification(event_id)
+    if result is None:
+        return JSONResponse(status_code=404, content={'status':'not_found'})
+    return {'status':'success', 'verification':result}
+
+
 # ==================== SYSTEM HEALTH ENDPOINT ====================
 @app.get("/api/health")
 def get_system_health():
     """
     Genuine System Health Status across all components:
     - Video Capture
-    - Person Detection (YOLOv8n)
-    - Pose Estimation (YOLO11n-Pose)
+    - Person Detection and Pose Estimation (configured YOLO pose model)
     - VLM Provider (Qwen2.5-VL / Status)
     - LangGraph Orchestrator
     - ChromaDB Persistent Semantic Memory
@@ -71,6 +105,8 @@ def get_system_health():
         vlm_health = "DISABLED"
     elif vlm_status == "ONLINE":
         vlm_health = "ONLINE"
+    elif vlm_status in ('LOADING', 'NOT_LOADED'):
+        vlm_health = 'LOADING'
     elif vlm_status in ["WEIGHTS_INCOMPLETE", "OFFLINE_FALLBACK"]:
         vlm_health = "DEGRADED"
     else:
@@ -79,7 +115,7 @@ def get_system_health():
     remote_notify_health = "NOT_CONFIGURED"
 
     # Derive overall aggregate health
-    if vlm_health in ["UNAVAILABLE", "DEGRADED"]:
+    if vlm_health in ["UNAVAILABLE", "DEGRADED", 'LOADING']:
         aggregate_status = "DEGRADED"
     else:
         aggregate_status = "ONLINE"
@@ -113,13 +149,14 @@ def get_system_health():
                 "status": vlm_health,
                 "device": getattr(vlm_adapter, "device", "cuda:0"),
                 "detail": vlm_adapter.status_detail,
-                "verification_mode": "DISABLED" if not VLM_ENABLED else ("VLM_MODEL" if vlm_adapter.status == "ONLINE" else "RULE_BASED_FALLBACK")
+                "verification_mode": "DISABLED" if not VLM_ENABLED else ("VLM_MODEL" if vlm_adapter.status == "ONLINE" else "UNAVAILABLE")
             },
             "langgraph_orchestration": {
-                "status": "ONLINE" if VLM_ENABLED else "DISABLED",
-                "engine": "LangGraph (StateGraph)",
+                "status": "DISABLED",
+                "engine": "LangGraph (legacy workflow)",
                 "telemetry": coordinator_status
             },
+            "incident_verification": verification_service.telemetry(),
             "chroma_db": {
                 "status": "ONLINE",
                 "collection": "carewatch_agent_memory",
@@ -216,44 +253,52 @@ def query_chroma_memory(req: MemoryQueryRequest):
 # ==================== VIDEO REPLAY & AVI INGESTION API ====================
 @app.post("/api/upload_video")
 async def upload_video(file: UploadFile = File(...)):
-    """
-    Accepts any standard video file (.avi, .mp4, .webm, .mkv, .mov)
-    and verifies it with OpenCV for server-side replay simulation.
-    """
+    """Store a bounded local upload under a unique name and validate actual decoding."""
+    suffix = Path(file.filename or '').suffix.lower()
+    if suffix not in {'.avi','.mp4','.webm','.mkv','.mov'}:
+        await file.close()
+        return JSONResponse(status_code=400, content={'status':'error','message':'Choose an MP4, AVI, MOV, MKV or WebM video.'})
+    safe_name = f'upload_{uuid.uuid4().hex}{suffix}'
+    target_path = REPLAYS_DIR / safe_name
+    accepted = False
     try:
-        raw_name = file.filename or f"replay_{int(time.time())}.avi"
-        safe_name = Path(raw_name).name
-        target_path = REPLAYS_DIR / safe_name
-        
-        content = await file.read()
-        with open(target_path, "wb") as f:
-            f.write(content)
-            
+        size = 0
+        with target_path.open('xb') as output:
+            while chunk := await file.read(1024*1024):
+                size += len(chunk)
+                if size > 500*1024*1024:
+                    return JSONResponse(status_code=413,content={'status':'error','message':'The video exceeds the 500 MB upload limit.'})
+                output.write(chunk)
         cap = cv2.VideoCapture(str(target_path))
-        is_opened = cap.isOpened()
-        fps = round(float(cap.get(cv2.CAP_PROP_FPS) or 25.0), 1)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if is_opened else 0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if is_opened else 0
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if is_opened else 0
-        cap.release()
-        
-        if not is_opened:
+        try:
+            ok, first = cap.read()
+            fps = float(cap.get(cv2.CAP_PROP_FPS))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        finally:
+            cap.release()
+        if not ok or first is None or total_frames <= 0 or not math.isfinite(fps) or fps <= 0:
             return JSONResponse(status_code=400, content={
-                "status": "error",
-                "message": f"OpenCV could not open video {safe_name}. Unsupported or corrupted codec."
+                'status':'error','message':'This video could not be decoded. Try another file or export it as MP4.'
             })
-            
+        h,w = first.shape[:2]
+        accepted = True
         return {
             "status": "success",
             "filename": safe_name,
+            "display_name": Path(file.filename).name,
             "format": target_path.suffix.lower(),
             "fps": fps,
             "total_frames": total_frames,
+            "duration_sec": round(total_frames/fps,2),
             "resolution": f"{w}x{h}",
-            "size_kb": round(len(content) / 1024, 1)
+            "size_kb": round(size / 1024, 1)
         }
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+    finally:
+        await file.close()
+        if not accepted:
+            target_path.unlink(missing_ok=True)
 
 @app.get("/api/replays")
 def list_replays():
@@ -273,13 +318,14 @@ async def websocket_replay_stream(websocket: WebSocket):
     """
     Server-side Replay Stream WebSocket:
     Reads .avi or .mp4 video frame-by-frame with OpenCV,
-    executes real-time GPU inference and agent analysis,
+    executes pose inference and schedules incident verification,
     and streams encoded frames + telemetry to frontend at video FPS.
     """
     await websocket.accept()
     session_pipeline = pipeline.new_session()
     query_params = websocket.query_params
     video_name = query_params.get("video", "sample_fall_clip.avi")
+    loop_video = query_params.get('loop', 'true').lower() not in ('0','false','no')
     
     # Check replays directory first, then root directory
     video_path = REPLAYS_DIR / Path(video_name).name
@@ -299,9 +345,12 @@ async def websocket_replay_stream(websocket: WebSocket):
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_delay = max(1.0 / min(fps, 30.0), 0.030)
     paused = False
     current_frame_pos = 0
+    incident_ids = set()
+    unverified_incidents = {}
 
     try:
         while True:
@@ -329,9 +378,23 @@ async def websocket_replay_stream(websocket: WebSocket):
 
             ret, frame = cap.read()
             if not ret:
+                if not loop_video:
+                    verification_service.close_session(session_pipeline.session_id)
+                    if current_frame_pos < total_frames-1:
+                        await websocket.send_json({'error':f'Video decoding stopped at frame {current_frame_pos} of {total_frames}. Results are partial.'})
+                        await websocket.close()
+                        break
+                    incidents = [record.copy() for event_id in incident_ids
+                                 if (record := verification_service.records.get(event_id,unverified_incidents.get(event_id))) is not None]
+                    await websocket.send_json({'type':'video_complete','processed_frames':current_frame_pos,
+                                               'total_frames':total_frames,'duration_sec':current_frame_pos/fps,
+                                               'incidents':incidents})
+                    await websocket.close()
+                    break
                 # Loop video seamlessly
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 current_frame_pos = 0
+                verification_service.close_session(session_pipeline.session_id)
                 session_pipeline.reset()
                 ret, frame = cap.read()
                 if not ret:
@@ -340,66 +403,24 @@ async def websocket_replay_stream(websocket: WebSocket):
             current_frame_pos += 1
             replay_timestamp = current_frame_pos / fps
 
-            # 1. Edge Inference Pipeline (YOLOv8n + YOLO11n-Pose + FSM)
+            # Pose inference stays independent of background VLM generation.
             result = session_pipeline.process_unified(frame, timestamp=replay_timestamp)
-            s1 = result["stage1_presence"]
-            s2 = result["stage2_posture"]
-            s3 = result["stage3_event"]
 
-            # 2. Event-driven LangGraph orchestration:
-            # Ordinary frames stream through without triggering agent investigation.
-            if not VLM_ENABLED:
-                result["central_server"] = {"status": "DISABLED", "verification_mode": "POSE_ONLY"}
-            elif agent.coordinator.should_trigger(s3):
-                active_alert_id = s3.get("active_alert", {}).get("alert_id") if s3.get("active_alert") else None
-                candidate_id = active_alert_id or f"REPLAY-{s1.get('track_id', 'T1')}-{int(time.time() // 8)}"
-                candidate = {
-                    "id": candidate_id,
-                    "camera_id": f"Replay ({Path(video_name).stem[:12]})",
-                    "track_id": s1.get("track_id", "Track-1"),
-                    "state": s3["state"],
-                    "kinematics": {
-                        "posture": s2["posture"],
-                        "torso_angle": s2["torso_angle_deg"],
-                        "drop_velocity": s3["drop_velocity"],
-                        "dwell_sec": s3["ground_dwell_sec"]
-                    }
-                }
-                frames_snapshot = list(session_pipeline.frame_buffer)[-4:] if len(session_pipeline.frame_buffer) > 0 else [frame]
-                agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
-                if agent_res:
-                    result["central_server"] = {
-                        "orchestrator": "LangGraph",
-                        "event_id": candidate_id,
-                        "escalation_decision": agent_res.get("policy_decision", {}).get("decision", "EMERGENCY / ALERT"),
-                        "decision_tone": agent_res.get("policy_decision", {}).get("decision_tone", "risk"),
-                        "recommended_action": agent_res.get("policy_decision", {}).get("action", "Alert dispatched"),
-                        "agent_rationale": agent_res.get("agent_rationale", ""),
-                        "vlm_verification": agent_res.get("vlm_result", {}),
-                        "incident_status": agent_res.get("incident_status", "VERIFYING"),
-                        "duration_ms": agent_res.get("duration_ms", 0.0)
-                    }
-                else:
-                    result["central_server"] = {
-                        "orchestrator": "LangGraph",
-                        "status": "INVESTIGATION_DISPATCHED",
-                        "event_id": candidate_id,
-                        "escalation_decision": "WARNING / REVIEW",
-                        "decision_tone": "warn",
-                        "recommended_action": "LangGraph incident investigation in progress",
-                        "agent_rationale": "Verifying candidate event frames through LangGraph",
-                        "incident_status": "VERIFYING"
-                    }
-            else:
-                result["central_server"] = {
-                    "orchestrator": "LangGraph",
-                    "status": "MONITORING_ACTIVE",
-                    "escalation_decision": "NORMAL / LOG",
-                    "decision_tone": "sage",
-                    "recommended_action": "Continuous Edge AI Monitoring",
-                    "agent_rationale": f"Subject stable ({s2['posture']}). Edge CV pipeline operating without incident trigger.",
-                    "incident_status": "NORMAL"
-                }
+            attach_verification(session_pipeline, result, frame)
+            verification = result.get('verification',{})
+            if verification.get('event_id'): incident_ids.add(verification['event_id'])
+            incident_ids.update(result.get('verification_incidents',{}))
+            alert = result.get('stage3_event',{}).get('active_alert')
+            if alert and alert.get('alert_id') and not verification.get('event_id'):
+                event_id = alert['alert_id']
+                incident_ids.add(event_id)
+                if event_id not in unverified_incidents:
+                    unverified_incidents[event_id] = {'event_id':event_id,'status':verification.get('status','UNAVAILABLE'),
+                        'trigger_time_sec':replay_timestamp,'scene_observation':verification.get('scene_observation','VLM verification was unavailable.')}
+                result['video_incident'] = unverified_incidents[event_id]
+            result['video_progress'] = {'processed_frames':current_frame_pos,'total_frames':total_frames,
+                                        'time_sec':replay_timestamp,'duration_sec':total_frames/fps,
+                                        'percent':round(min(100,current_frame_pos/max(total_frames,1)*100),1)}
 
             # 3. Downscale slightly if large to ensure smooth WebSocket delivery
             fh, fw = frame.shape[:2]
@@ -416,17 +437,15 @@ async def websocket_replay_stream(websocket: WebSocket):
     except Exception as e:
         print("[WS Replay Stream error]:", e)
     finally:
+        verification_service.close_session(session_pipeline.session_id)
         cap.release()
-
-# Keep track of logged falls in current streaming session
-logged_fall_ids = set()
 
 # ==================== UNIFIED WEBSOCKET PIPELINE ====================
 @app.websocket("/ws/pipeline")
 async def websocket_pipeline(websocket: WebSocket):
     """
     Unified end-to-end WebSocket:
-    Edge Device (Stages 1-3) -> Event-Driven LangGraph Orchestrator (VLM + ChromaDB + Escalation Policy) -> Output
+    Pose and temporal fall detection -> asynchronous local VLM verification -> Output
     """
     await websocket.accept()
     session_pipeline = pipeline.new_session()
@@ -444,97 +463,15 @@ async def websocket_pipeline(websocket: WebSocket):
                 continue
             result = session_pipeline.process_unified(frame, timestamp=video_time)
             
-            s1 = result["stage1_presence"]
-            s2 = result["stage2_posture"]
-            s3 = result["stage3_event"]
-
-            # Event-Driven LangGraph Orchestration:
-            # Ordinary frames do NOT trigger agent investigations.
-            if not VLM_ENABLED:
-                result["central_server"] = {"status": "DISABLED", "verification_mode": "POSE_ONLY"}
-            elif agent.coordinator.should_trigger(s3):
-                active_alert_id = s3.get("active_alert", {}).get("alert_id") if s3.get("active_alert") else None
-                candidate_id = active_alert_id or f"LIVE-{s1.get('track_id', 'T1')}-{int(time.time() // 8)}"
-                candidate = {
-                    "id": candidate_id,
-                    "camera_id": "Camera 01",
-                    "track_id": s1.get("track_id", "Track-1"),
-                    "state": s3["state"],
-                    "kinematics": {
-                        "posture": s2["posture"],
-                        "torso_angle": s2["torso_angle_deg"],
-                        "drop_velocity": s3["drop_velocity"],
-                        "dwell_sec": s3["ground_dwell_sec"]
-                    }
-                }
-
-                frames_snapshot = list(session_pipeline.frame_buffer)[-4:] if len(session_pipeline.frame_buffer) > 0 else [frame]
-                agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
-                if agent_res:
-                    result["central_server"] = {
-                        "orchestrator": "LangGraph",
-                        "event_id": candidate_id,
-                        "escalation_decision": agent_res.get("policy_decision", {}).get("decision", "EMERGENCY / ALERT"),
-                        "decision_tone": agent_res.get("policy_decision", {}).get("decision_tone", "risk"),
-                        "recommended_action": agent_res.get("policy_decision", {}).get("action", "Alert dispatched"),
-                        "agent_rationale": agent_res.get("agent_rationale", ""),
-                        "vlm_verification": agent_res.get("vlm_result", {}),
-                        "incident_status": agent_res.get("incident_status", "VERIFYING"),
-                        "duration_ms": agent_res.get("duration_ms", 0.0)
-                    }
-                else:
-                    result["central_server"] = {
-                        "orchestrator": "LangGraph",
-                        "status": "INVESTIGATION_DISPATCHED",
-                        "event_id": candidate_id,
-                        "escalation_decision": "WARNING / REVIEW",
-                        "decision_tone": "warn",
-                        "recommended_action": "LangGraph incident investigation in progress",
-                        "agent_rationale": "Verifying candidate event frames through LangGraph",
-                        "incident_status": "VERIFYING"
-                    }
-            else:
-                result["central_server"] = {
-                    "orchestrator": "LangGraph",
-                    "status": "MONITORING_ACTIVE",
-                    "escalation_decision": "NORMAL / LOG",
-                    "decision_tone": "sage",
-                    "recommended_action": "Continuous Edge AI Monitoring",
-                    "agent_rationale": f"Subject stable ({s2['posture']}). Edge CV pipeline operating without incident trigger.",
-                    "incident_status": "NORMAL"
-                }
-
-            # Dynamically log verified fall events to ChromaDB persistent memory
-            if VLM_ENABLED and s3["fall_confirmed"]:
-                event_uid = s3.get("active_alert", {}).get("alert_id") or f"EVT-LIVE-{int(time.time() // 8)}"
-                if event_uid not in logged_fall_ids:
-                    logged_fall_ids.add(event_uid)
-                    doc_text = (
-                        f"Camera 01 Live Confirmed Fall at {time.strftime('%H:%M:%S')}: "
-                        f"Drop velocity {s3['drop_velocity']:.1f} px/s, "
-                        f"torso tilt {s2['torso_angle_deg']:.1f}°, "
-                        f"persistent floor dwell {s3['ground_dwell_sec']:.1f}s. "
-                        f"LangGraph Orchestration Decision: EMERGENCY / ALERT."
-                    )
-                    meta = {
-                        "camera": "Camera 01",
-                        "source": "Live Edge Stream",
-                        "timestamp_sec": round(time.time(), 1),
-                        "category": "Fall",
-                        "state": "FALL_CONFIRMED",
-                        "severity": "CRITICAL EMERGENCY",
-                        "drop_velocity_px_s": float(s3["drop_velocity"]),
-                        "dwell_sec": float(s3["ground_dwell_sec"]),
-                        "provenance": "REAL_PIPELINE",
-                        "is_synthetic": False
-                    }
-                    chroma_memory.log_new_event(event_uid, doc_text, meta)
+            attach_verification(session_pipeline, result, frame)
 
             await websocket.send_json(result)
     except WebSocketDisconnect:
         pass
     except Exception as e:
         print("[WS Pipeline error]:", e)
+    finally:
+        verification_service.close_session(session_pipeline.session_id)
 
 @app.websocket("/ws/motion")
 async def websocket_motion(websocket: WebSocket):

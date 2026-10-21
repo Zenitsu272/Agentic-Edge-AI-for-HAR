@@ -1,0 +1,8 @@
+# Install into the same environment as the CUDA-enabled PyTorch pose pipeline.
+# Keep the model weights in the local model cache; do not commit them to Git.
+transformers==5.15.1
+accelerate==1.15.0
+bitsandbytes==0.50.2
+safetensors>=0.8.0
+huggingface-hub>=1.23.0,<2
+Pillow>=10
