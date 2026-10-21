@@ -98,7 +98,7 @@ window.updateDashboard = data => {
   text('fallState',fallAlert ? (s3.fall_detection_level==='possible_partial' ? 'Possible / partial fall' : 'Fall detected') : s3.state==='VERIFYING' ? 'Checking motion' : 'Monitoring');
   text('descentMetric',`${s3.normalized_drop_speed || 0} torso lengths/s`);
   text('dwellMetric',`${s3.ground_dwell_sec || 0} s`);
-  document.getElementById('fallBanner').hidden = !fallAlert;
+  document.getElementById('fallBanner').hidden = !(data.visual_fall_alert_active ?? fallAlert);
   text('fallBannerDetail',s3.fall_detection_level==='possible_partial' ? 'Possible / partial fall after sudden motion from standing or sitting. Alert stays visible for 10 seconds.' : 'Sustained collapse confirmed by the pose checks. Check the person.');
   const cards = document.getElementById('personCards'); cards.replaceChildren();
   if (!poses.length) cards.append(node('p','muted','Waiting for visible body keypoints.'));

@@ -16,7 +16,8 @@ function client(width, height, overrides={}) {
     if (!elements.has(id)) elements.set(id, {clientWidth: width, clientHeight: height, getContext: () => context, classList: classes(), parentElement: {}, pause(){}, load(){}, removeAttribute(){}});
     return elements.get(id);
   };
-  const sandbox = {document: {body: element('body'), getElementById: element, createElement: () => element('capture')}, window: {devicePixelRatio: 2}, ResizeObserver: class {observe(){}}, clearTimeout, URL};
+  const sandbox = {document: {body: element('body'), getElementById: element, createElement: () => element('capture')}, window: {devicePixelRatio: 2}, ResizeObserver: class {observe(){}}, clearTimeout, URL,
+    setTimeout:(callback,delay)=>{const timer=setTimeout(callback,delay);timer.unref();return timer;}};
   Object.assign(sandbox,overrides);
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync('dist/edge-vision.js','utf8') + '\nthis.client = new EdgeVisionClient();', sandbox);
@@ -105,8 +106,62 @@ test('held fall remains the main label when the person leaves the frame', () => 
   result.stage3_event.fall_confirmed=false;
   c.handleResult(result);
   assert.equal(elements.get('activityLabel').textContent,'No person detected');
+  c.stop();
   assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
   assert.ok(!elements.get('cameraView').classList.contains('fall-alert-active'));
+});
+
+function alertClock() {
+  let now=0,next=0;const timers=new Map();
+  return {Date:{now:()=>now},setTimeout:(callback,delay)=>{timers.set(++next,{at:now+delay,callback});return next;},
+    clearTimeout:id=>timers.delete(id),tick:ms=>{
+      now+=ms;
+      for(const [id,timer] of [...timers])if(timer.at<=now){timers.delete(id);timer.callback();}
+    }};
+}
+function fallPacket(id='incident-1') {
+  return {frame_width:640,frame_height:480,poses:[],inference_ms:20,
+    stage1_presence:{person_present:true,persons_count:1},
+    stage2_posture:{posture:'Fall detected',category:'Fall'},
+    stage3_event:{fall_alert_active:true,fall_confirmed:false,active_alert:{alert_id:id},
+      active_incidents:[{alert_id:id}]}};
+}
+
+test('red border and banner expire at ten seconds despite repeated detections and VLM updates',()=>{
+  const clock=alertClock();const {c,elements}=client(640,480,clock);
+  const data=fallPacket();c.handleResult(data);
+  clock.tick(9000);data.stage3_event.fall_confirmed=true;
+  data.verification={status:'CONFIRMED_FALL',scene_observation:'Visible collapse.'};c.handleResult(data);
+  assert.ok(elements.get('body').classList.contains('fall-alert-active'));
+  clock.tick(999);assert.ok(elements.get('cameraView').classList.contains('fall-alert-active'));
+  clock.tick(1);
+  assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
+  assert.ok(!elements.get('cameraView').classList.contains('fall-alert-active'));
+  assert.equal(elements.get('fallBanner').hidden,true);
+  c.handleResult(data);
+  assert.equal(data.visual_fall_alert_active,false);
+  assert.equal(elements.get('fallBanner').hidden,true);
+  assert.equal(elements.get('activityLabel').textContent,'Fall confirmed · VLM');
+});
+
+test('red alert clears without another video frame and a different incident can alert again',()=>{
+  const clock=alertClock();const {c,elements}=client(640,480,clock);
+  c.handleResult(fallPacket());clock.tick(10000);
+  assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
+  c.handleResult(fallPacket('incident-2'));
+  assert.ok(elements.get('body').classList.contains('fall-alert-active'));
+  clock.tick(10000);assert.equal(elements.get('fallBanner').hidden,true);
+  c.handleResult(fallPacket('incident-1'));
+  assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
+});
+
+test('stop cancels the previous visual alert before a new stream starts',()=>{
+  const clock=alertClock();const {c,elements}=client(640,480,clock);
+  c.handleResult(fallPacket());clock.tick(5000);c.stop();
+  assert.ok(!elements.get('body').classList.contains('fall-alert-active'));
+  c.handleResult(fallPacket());clock.tick(5000);
+  assert.ok(elements.get('body').classList.contains('fall-alert-active'));
+  clock.tick(5000);assert.equal(elements.get('fallBanner').hidden,true);
 });
 
 test('a partial fall alert is displayed before strict confirmation', () => {

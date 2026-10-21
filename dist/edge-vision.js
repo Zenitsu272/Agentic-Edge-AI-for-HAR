@@ -10,6 +10,10 @@ class EdgeVisionClient {
     this.generation = 0;
     this.running = false;
     this.poses = [];
+    this.visualAlertIds = new Set();
+    this.visualAlertUntil = 0;
+    this.anonymousAlertSequence = 0;
+    this.previousFallSignal = false;
     this.pairs = [[0,1],[0,2],[1,3],[2,4],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];
     new ResizeObserver(() => this.drawOverlay()).observe(this.overlay.parentElement);
   }
@@ -17,6 +21,30 @@ class EdgeVisionClient {
   setAlertAppearance(active) {
     document.body.classList.toggle('fall-alert-active', Boolean(active));
     document.getElementById('cameraView').classList.toggle('fall-alert-active', Boolean(active));
+    document.getElementById('fallBanner').hidden = !active;
+  }
+  updateFallAppearance(stage) {
+    const detected = Boolean(stage.fall_alert_active ?? stage.fall_confirmed);
+    const ids = detected ? [stage.active_alert?.alert_id || stage.active_alert?.id,
+      ...(stage.active_incidents || []).map(incident => incident.alert_id || incident.id)].filter(Boolean) : [];
+    if (detected && !ids.length) {
+      if (!this.previousFallSignal) this.anonymousAlertSequence++;
+      ids.push(`anonymous:${this.anonymousAlertSequence}`);
+    }
+    this.previousFallSignal = detected;
+    if (ids.some(id => !this.visualAlertIds.has(id))) {
+      ids.forEach(id => this.visualAlertIds.add(id));
+      this.visualAlertUntil = Date.now() + 10000;
+      clearTimeout(this.visualAlertTimer);
+      // Expire independently of video frames, including a paused/finished upload.
+      this.visualAlertTimer = setTimeout(() => {
+        this.visualAlertUntil = 0;
+        this.setAlertAppearance(false);
+      }, 10000);
+    }
+    const visible = Date.now() < this.visualAlertUntil;
+    this.setAlertAppearance(visible);
+    return visible;
   }
   async startCamera() {
     this.stop();
@@ -120,7 +148,7 @@ class EdgeVisionClient {
     this.frameHeight = data.frame_height || this.frameHeight;
     this.poses = data.poses || (pose.keypoints?.length ? [{keypoints: pose.keypoints, posture: pose.posture, box: pose.box}] : []);
     const fallAlert = data.stage3_event?.fall_alert_active ?? data.stage3_event?.fall_confirmed;
-    this.setAlertAppearance(fallAlert);
+    data.visual_fall_alert_active = this.updateFallAppearance(data.stage3_event || {});
     const review = data.verification;
     const activity = fallAlert
       ? (review?.status === 'CONFIRMED_FALL' ? 'Fall confirmed · VLM' : 'Fall detected')
@@ -184,6 +212,9 @@ class EdgeVisionClient {
   }
   stop() {
     this.generation++; this.running = false;
+    clearTimeout(this.visualAlertTimer);
+    this.visualAlertUntil = 0; this.visualAlertIds.clear();
+    this.previousFallSignal = false; this.anonymousAlertSequence = 0;
     this.checkingVideo = false;
     this.uploadAbort?.abort(); this.uploadAbort = null;
     window.stopVideoCheck?.();
