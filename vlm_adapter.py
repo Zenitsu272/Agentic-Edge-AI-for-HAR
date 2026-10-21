@@ -283,7 +283,8 @@ class VLMAdapter:
         conf = float(parsed.get("confidence", 0.5))
         uncertainty = parsed.get("uncertainty", False)
         recovery = parsed.get("voluntary_recovery", False)
-        scene_obs = parsed.get("scene_observation") or parsed.get("action_observed", output_text[:120])
+        raw_obs = parsed.get("scene_observation") or parsed.get("action_observed", output_text[:120]) or ""
+        scene_obs = f"Qwen2.5-VL Verified: {raw_obs}" if not raw_obs.startswith("Qwen2.5-VL") else raw_obs
 
         return {
             "event_id": event_id,

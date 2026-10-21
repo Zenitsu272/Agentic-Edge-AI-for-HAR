@@ -346,7 +346,8 @@ async def websocket_replay_stream(websocket: WebSocket):
                         "dwell_sec": s3["ground_dwell_sec"]
                     }
                 }
-                agent_res = await agent.coordinator.dispatch_investigation_async(candidate)
+                frames_snapshot = list(pipeline.frame_buffer)[-4:] if len(pipeline.frame_buffer) > 0 else [frame]
+                agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
                 if agent_res:
                     result["central_server"] = {
                         "orchestrator": "LangGraph",
@@ -441,8 +442,8 @@ async def websocket_pipeline(websocket: WebSocket):
                     }
                 }
 
-                # Asynchronous, deduplicated investigation dispatch
-                agent_res = await agent.coordinator.dispatch_investigation_async(candidate)
+                frames_snapshot = list(pipeline.frame_buffer)[-4:] if len(pipeline.frame_buffer) > 0 else [frame]
+                agent_res = await agent.coordinator.dispatch_investigation_async(candidate, evidence_frames=frames_snapshot)
                 if agent_res:
                     result["central_server"] = {
                         "orchestrator": "LangGraph",
